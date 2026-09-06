@@ -1,0 +1,4 @@
+# Config mínima de la CLI de Supabase.
+# project_id se rellena al enlazar el proyecto nuevo de este repo con `supabase link`
+# (NO reutilizar el de la asesoría de la que se clonó este stack).
+project_id = ""
