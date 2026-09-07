@@ -17,9 +17,9 @@ export function Hero() {
         </h1>
 
         <p className="max-w-xl text-lg leading-relaxed text-text-secondary">
-          Responde unas preguntas sobre cómo trabajáis en <strong>[Nombre de la marca]</strong> y
-          recibe al momento una lectura de tu preparación para la IA y una lista de automatizaciones
-          por las que empezar — sin cita previa, sin compromiso.
+          Responde unas preguntas sobre cómo trabaja tu negocio y <strong>[Nombre de la marca]</strong>{" "}
+          te devuelve al momento una lectura de tu preparación para la IA y una lista de
+          automatizaciones por las que empezar — sin cita previa, sin compromiso.
         </p>
 
         <div className="flex flex-col items-center gap-3 pt-2">
