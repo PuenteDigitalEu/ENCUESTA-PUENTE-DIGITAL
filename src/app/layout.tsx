@@ -15,9 +15,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Diagnóstico financiero",
+  title: "Diagnóstico de preparación para IA",
   description:
-    "Landing con agente de diagnóstico financiero para captación de clientes de una asesoría financiera.",
+    "Encuesta conversacional que evalúa la preparación de una pyme o autónomo para implantar IA y propone por dónde empezar.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

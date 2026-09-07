@@ -2,24 +2,16 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
 import { clienteClaude, MODELO_ENTREVISTA } from "@/lib/claude/client";
-import { generarPlan } from "@/lib/claude/plan";
 import { cargarSystemPromptEntrevista } from "@/lib/claude/system-prompt";
-import { enviarAvisoAsesor } from "@/lib/email/aviso-asesor";
 import { hashIp, obtenerIpVisitante, UMBRAL_ENVIAR_MENSAJE, VENTANA_HORAS } from "@/lib/ip";
-import type { Ficha } from "@/lib/motor/ficha";
-import type { Informe } from "@/lib/motor/informe";
-import { calcularInforme } from "@/lib/motor/informe";
-import { contieneFicha, parsearFicha } from "@/lib/motor/parseo";
+import { contieneFicha, parsearRespuestas } from "@/lib/rubrica";
 import { clienteSupabase } from "@/lib/supabase/server";
 import {
   comprobarLimiteUso,
   incrementarTurno,
-  persistirCierre,
-  registrarNotificacionAsesor,
+  persistirRespuestas,
   validarToken,
-  type ResultadoCierre,
 } from "@/lib/supabase/persistencia";
-import type { SupabaseClient } from "@supabase/supabase-js";
 
 // fs.readFileSync (en system-prompt.ts) necesita el runtime de Node, no Edge.
 export const runtime = "nodejs";
@@ -29,23 +21,18 @@ interface MensajeChat {
   content: string;
 }
 
-/**
- * Tope duro de turnos, muy por encima del ~15 que pide `plantilla-entrevista.md` — es una red de
- * seguridad del servidor (evita una conversación descontrolada), no el límite de uso por IP
- * (`docs/architecture.md` → "Protección contra abuso", `docs/features/limite-de-uso.md`), que
- * limita cuántos turnos procesa una misma IP, no cuántos tiene una conversación concreta.
- */
+/** Tope duro de turnos: red de seguridad del servidor, no el límite de uso por IP. */
 const MAX_MENSAJES = 40;
 
+const MENSAJE_CIERRE =
+  "Perfecto, ya tengo todo lo que necesito. Antes de enseñarte el diagnóstico necesito que me " +
+  "dejes unos datos de contacto.";
+
 /**
- * Fases 1-4 del flujo, en un turno: entrevista (`instrucciones-sistema.md`) y, al cerrar,
- * diagnóstico y plan (`instrucciones-motor.md`).
- *
- * `token` es obligatorio (M-06): lo crea `POST /api/conversacion` al aceptar el consentimiento, y
- * es lo único que autoriza a esta ruta a procesar un turno de esa conversación concreta — sin
- * token válido, 401 con mensaje genérico (nunca detalle técnico, ver `FLOW-01` → "Casos de
- * error"). El resto del historial sigue viajando completo en cada turno (sin estado adicional en
- * el servidor más allá de lo que ya vive en `conversaciones`).
+ * Un turno de la entrevista. Sin estado en servidor: el cliente manda el historial completo con
+ * el `token` que autoriza a escribir en esa encuesta. Cuando el modelo emite la ficha de cierre
+ * (`FICHA-ENCUESTA-IA`), se parsea, se persiste `respuestas`, la encuesta pasa a `respondida` y se
+ * devuelve `fin_entrevista: true` — el cliente muestra entonces el formulario de contacto.
  */
 export async function POST(request: Request) {
   let body: { token?: unknown; messages?: unknown };
@@ -78,16 +65,14 @@ export async function POST(request: Request) {
 
   const supabase = clienteSupabase();
 
-  let conversacion;
+  let encuesta;
   try {
-    conversacion = await validarToken(supabase, body.token);
+    encuesta = await validarToken(supabase, body.token, ["en_curso"]);
   } catch (error) {
     console.error("Error validando el token en /api/chat:", error);
     return NextResponse.json({ error: "No se pudo procesar el mensaje. Inténtalo de nuevo." }, { status: 502 });
   }
-  if (!conversacion) {
-    // Mensaje genérico a propósito: no revela si el token no existe, ya expiró, o la conversación
-    // ya se cerró — el visitante no necesita saber cuál de las tres es (FLOW-01 → "Casos de error").
+  if (!encuesta) {
     return NextResponse.json({ error: "Esta conversación ya no está disponible." }, { status: 401 });
   }
 
@@ -116,50 +101,40 @@ export async function POST(request: Request) {
     const respuesta = await claude.messages.create({
       model: MODELO_ENTREVISTA,
       max_tokens: 1024,
-      // Sin razonamiento extendido: conducir un turno de entrevista no lo necesita, y consume el
-      // mismo presupuesto de max_tokens que la respuesta visible (ver la misma nota en
-      // lib/claude/plan.ts, donde este límite sí llegó a vaciar la respuesta real).
       thinking: { type: "disabled" },
       system: cargarSystemPromptEntrevista(),
       messages: mensajes,
     });
 
     const texto = respuesta.content
-      .filter((bloque): bloque is Anthropic.TextBlock => bloque.type === "text")
-      .map((bloque) => bloque.text)
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
       .join("\n");
 
-    await incrementarTurno(supabase, conversacion.id, conversacion.turnosTotales);
+    await incrementarTurno(supabase, encuesta.id, encuesta.turnosTotales);
 
-    // Fase 2 → Fase 3-4: cuando el mensaje del agente trae la ficha de cierre, no se le enseña el
-    // volcado en crudo al visitante — se calcula el informe (determinista, lib/motor/), se
-    // persiste el cierre completo (M-04) y se sustituye por el plan ya redactado (§8 de
-    // instrucciones-motor.md).
     if (contieneFicha(texto)) {
-      const { ficha, anomalias } = parsearFicha(texto);
+      const { respuestas, anomalias } = parsearRespuestas(texto);
       if (anomalias.length > 0) {
         console.warn("Anomalías al parsear la ficha en /api/chat:", anomalias);
       }
-
-      const informe = calcularInforme(ficha);
-      const plan = await generarPlan(ficha, informe);
-
-      // Si la persistencia falla, no se le muestra el plan al visitante (aunque ya esté
-      // calculado): un diagnóstico que nunca se guardó no se puede auditar después ni consultar
-      // desde el panel del asesor — mejor un error claro que invite a reintentar (FLOW-01).
-      const resultado = await persistirCierre(supabase, {
-        conversacionId: conversacion.id,
-        ficha,
-        informe,
-        planMarkdown: plan,
+      // El coste de la entrevista se aproxima con el uso del último turno (el que cierra). La
+      // acumulación turno a turno es un refinamiento de Fase 2 (docs/business.md §7).
+      await persistirRespuestas(supabase, {
+        encuestaId: encuesta.id,
+        respuestas,
+        costeEntrevista: {
+          input_tokens: respuesta.usage.input_tokens,
+          output_tokens: respuesta.usage.output_tokens,
+          cache_read_input_tokens: respuesta.usage.cache_read_input_tokens ?? 0,
+          cache_creation_input_tokens: respuesta.usage.cache_creation_input_tokens ?? 0,
+        },
       });
 
-      // M-05/FLOW-02: el aviso al asesor nunca bloquea la respuesta al visitante — su plan ya está
-      // calculado y persistido de forma independiente. Un fallo de envío se registra como
-      // `fallido`, no se reintenta aquí ni impide que el visitante vea su diagnóstico.
-      await avisarAsesorSinBloquear(supabase, conversacion.id, ficha, informe, plan, resultado);
-
-      return NextResponse.json({ message: { role: "assistant", content: plan } });
+      return NextResponse.json({
+        fin_entrevista: true,
+        message: { role: "assistant", content: MENSAJE_CIERRE },
+      });
     }
 
     return NextResponse.json({ message: { role: "assistant", content: texto } });
@@ -169,47 +144,6 @@ export async function POST(request: Request) {
       { error: "No se pudo procesar el mensaje. Inténtalo de nuevo." },
       { status: 502 },
     );
-  }
-}
-
-/**
- * M-05/FLOW-02: envía el aviso al asesor y deja constancia en `notificaciones_asesor`, siempre —
- * el intento se registra tanto si Resend confirma el envío como si falla. Nunca lanza: un problema
- * aquí no debe tirar abajo el turno que ya le está devolviendo el plan al visitante.
- */
-async function avisarAsesorSinBloquear(
-  supabase: SupabaseClient,
-  conversacionId: string,
-  ficha: Ficha,
-  informe: Informe,
-  planMarkdown: string,
-  resultado: ResultadoCierre,
-): Promise<void> {
-  const destinatario = process.env.ADVISOR_NOTIFICATION_EMAIL;
-  if (!destinatario) {
-    console.warn("ADVISOR_NOTIFICATION_EMAIL no está configurada — no se envía aviso al asesor.");
-    return;
-  }
-
-  let exito = true;
-  try {
-    await enviarAvisoAsesor(destinatario, {
-      nombreCliente: ficha.nombre.valor,
-      emailCliente: ficha.email.valor,
-      modo: informe.modo,
-      fichaId: resultado.fichaId,
-      informeId: resultado.informeId,
-      planMarkdown,
-    });
-  } catch (error) {
-    exito = false;
-    console.error("Error enviando el aviso al asesor:", error);
-  }
-
-  try {
-    await registrarNotificacionAsesor(supabase, { conversacionId, destinatario, exito });
-  } catch (error) {
-    console.error("Error registrando la notificación al asesor:", error);
   }
 }
 

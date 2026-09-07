@@ -1,20 +1,17 @@
 #!/usr/bin/env node
 /**
  * Verifica, contra un Postgres real (PGlite, WASM — no un mock), que las escrituras que hace
- * `lib/supabase/persistencia.ts` al cerrar una conversación (cliente, ficha, deudas, informe,
- * plan) respetan de verdad el esquema: columnas, `not null`, `check`, claves foráneas y el `unique`
- * de `clientes.email`.
+ * `src/lib/supabase/persistencia.ts` respetan el esquema de `supabase/migrations/001_esquema_inicial.sql`:
+ * columnas, `not null`, `check`, claves foráneas, `unique` y `on delete cascade`.
  *
- * Qué SÍ prueba esto: que un juego de columnas con esta forma pasa (o falla, en los casos
- * negativos) contra el esquema real de `supabase/migrations/001_esquema_inicial.sql`.
+ * Qué SÍ prueba: que un juego de columnas con esta forma pasa (o falla, en los casos negativos)
+ * contra el esquema real, y que borrar una `encuestas` arrastra en cascada sus filas dependientes.
  * Qué NO prueba: que `persistencia.ts` genere exactamente estas columnas — eso lo cubren los tests
- * mockeados de `persistencia.test.ts`, que sí importan el código real. Los dos juegos de columnas
- * de aquí abajo se mantienen a mano en paralelo a `fichaAFila`/`deudasAFilas`/`informeAFila`/
- * `planAFila` — si esas funciones cambian una columna, este script hay que actualizarlo también
- * (ver docs/features/consentimiento-y-persistencia.md → "Decisiones tomadas").
+ * de `persistencia.test.ts`. Los juegos de columnas de aquí se mantienen a mano en paralelo a
+ * `persistencia.ts`; si esas funciones cambian una columna, este script se actualiza en el mismo commit.
  *
- * No corre en CI (descarga el WASM de PGlite y tarda varios segundos) — se ejecuta a mano antes de
- * cerrar la feature, igual que se hizo con la migración original.
+ * No corre en CI (descarga el WASM de PGlite y tarda). Se ejecuta a mano antes de cerrar una
+ * feature que toque el esquema.
  *
  * Uso:  node scripts/verificar-persistencia.mjs
  */
@@ -28,20 +25,27 @@ const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIGRACION = join(RAIZ, 'supabase', 'migrations', '001_esquema_inicial.sql');
 
 let fallos = 0;
-function ok(descripcion) {
-  console.log(`  OK  ${descripcion}`);
-}
-function fallo(descripcion, detalle) {
+const ok = (d) => console.log(`  OK  ${d}`);
+const fallo = (d, detalle) => {
   fallos++;
-  console.log(`  FALLO  ${descripcion}`);
+  console.log(`  FALLO  ${d}`);
   if (detalle) console.log(`         ${detalle}`);
+};
+
+async function esperarError(descripcion, accion) {
+  try {
+    await accion();
+    fallo(descripcion, 'se esperaba que la escritura fallara, y no falló');
+  } catch {
+    ok(descripcion);
+  }
 }
 
 async function main() {
   const db = new PGlite();
 
-  // Supabase provee auth.users/auth.uid()/los tres roles de forma nativa; PGlite no, así que se
-  // simulan aquí solo lo justo para que la migración (que sí depende de ellos) aplique limpia.
+  // Supabase provee auth.users / auth.uid() / los tres roles de forma nativa; PGlite no, así que
+  // se simulan aquí solo lo justo para que la migración aplique limpia.
   await db.exec(`
     create schema auth;
     create table auth.users (id uuid primary key default gen_random_uuid());
@@ -51,159 +55,184 @@ async function main() {
     create role service_role;
   `);
 
-  const migracion = readFileSync(MIGRACION, 'utf-8');
-  await db.exec(migracion);
+  await db.exec(readFileSync(MIGRACION, 'utf-8'));
   console.log('Migración aplicada sin errores.\n');
 
-  // ── Cadena feliz: cliente → conversación → ficha → deudas → informe → plan ──────────────────
-  console.log('Cadena de escritura del cierre (persistirCierre):');
+  // ── Cadena feliz ────────────────────────────────────────────────────────────
+  console.log('Cadena de escritura de la encuesta:');
 
-  const cliente = await db.query(
-    `insert into clientes (nombre, email) values ($1, $2) returning id`,
-    ['Silvia', 'silvia@example.com'],
+  // 1. Alta de la encuesta al consentir (crearEncuesta()).
+  const enc = await db.query(
+    `insert into encuestas (consentimiento_en, consentimiento_version)
+     values (now(), '2026-09-07') returning id, token, estado`,
+    [],
   );
-  const clienteId = cliente.rows[0].id;
-  ok('clientes: insert con nombre + email (mismas columnas que enlazarCliente())');
+  const encuestaId = enc.rows[0].id;
+  if (enc.rows[0].estado !== 'en_curso') fallo('encuestas: estado por defecto en_curso', `fue ${enc.rows[0].estado}`);
+  else ok('encuestas: insert con consentimiento_en + consentimiento_version, estado en_curso');
 
-  const conversacion = await db.query(
-    `insert into conversaciones (cliente_id, consentimiento_en) values ($1, now())
-     returning id, token`,
-    [clienteId],
-  );
-  const conversacionId = conversacion.rows[0].id;
-  ok('conversaciones: insert con consentimiento_en (mismas columnas que crearConversacion())');
+  // 2. Límite de uso por IP (comprobarLimiteUso()).
+  await db.query(`insert into limites_uso (ip_hash, accion) values ($1, 'crear_encuesta')`, ['hash-de-prueba']);
+  await db.query(`insert into limites_uso (ip_hash, accion) values ($1, 'enviar_mensaje')`, ['hash-de-prueba']);
+  ok('limites_uso: insert con acciones crear_encuesta / enviar_mensaje');
 
-  // Columnas exactas de fichaAFila() en persistencia.ts — mantener sincronizado si esa función cambia.
-  const ficha = await db.query(
-    `insert into fichas (
-       conversacion_id, nombre, nombre_estado, fecha_entrevista,
-       ingresos_netos_mensual, ingresos_netos_mensual_estado,
-       ingresos_estabilidad, ingresos_estabilidad_estado,
-       gastos_fijos_mensual, gastos_fijos_mensual_estado,
-       deudas_interes_alto_declarado, deudas_interes_alto_declarado_estado,
-       patrimonio_liquido, patrimonio_liquido_estado,
-       patrimonio_invertido, patrimonio_invertido_estado,
-       patrimonio_distribucion, patrimonio_distribucion_estado,
-       aportacion_mensual_actual, aportacion_mensual_actual_estado,
-       colchon_meses, colchon_meses_estado,
-       objetivo_proposito, objetivo_proposito_estado,
-       objetivo_importe, objetivo_importe_estado,
-       objetivo_plazo_anios, objetivo_plazo_anios_estado,
-       riesgo_tolerancia_declarada, riesgo_tolerancia_declarada_estado,
-       riesgo_comportamiento_real, riesgo_comportamiento_real_estado,
-       riesgo_perfil_derivado, riesgo_perfil_derivado_estado,
-       edad, edad_estado, personas_a_cargo, personas_a_cargo_estado,
-       situacion_laboral, situacion_laboral_estado
-     ) values (
-       $1, $2, 'confirmado', $3,
-       2800, 'confirmado', 'estable', 'confirmado',
-       1600, 'confirmado',
-       'no', 'confirmado',
-       12000, 'confirmado', 10000, 'confirmado',
-       'todo en un fondo indexado', 'confirmado',
-       150, 'confirmado',
-       5, 'confirmado',
-       'bajar el ritmo a los 60', 'confirmado', 150000, 'confirmado', 20, 'confirmado',
-       'media', 'confirmado', 'aguantó la caída del covid sin vender', 'confirmado',
-       'moderado', 'confirmado',
-       40, 'confirmado', 0, 'confirmado',
-       'diseñadora gráfica en plantilla', 'confirmado'
-     ) returning id`,
-    [conversacionId, 'Silvia', '2026-08-27'],
-  );
-  const fichaId = ficha.rows[0].id;
-  ok('fichas: insert con las 41 columnas de fichaAFila()');
-
-  await db.query(
-    `insert into deudas (ficha_id, orden, tipo, tipo_estado, importe, importe_estado, cuota, cuota_estado, interes, interes_estado)
-     values ($1, 1, 'hipoteca', 'confirmado', 150000, 'confirmado', 620, 'confirmado', 1.9, 'confirmado')`,
-    [fichaId],
-  );
-  ok('deudas: insert con las columnas de deudasAFilas()');
-
-  const informe = await db.query(
-    `insert into informes (
-       ficha_id, modo, tipo_meta, flujo_libre, porcentaje_camino_recorrido, proyeccion_valor_futuro,
-       gap_euros, gap_anios, aportacion_propuesta, cartera_objetivo, rentabilidad_esperada_neta,
-       mc_percentil_pesimista, mc_percentil_central, mc_percentil_optimista, mc_probabilidad_cumplimiento,
-       mc_banda, contenido, pendientes_reunion, version_motor, version_reglas
-     ) values (
-       $1, 'completo', 'patrimonio', 580, 6.7, 117614, 32386, 25.4, 406,
-       $2, 0.0425, 84405, 114373, 155067, 0.1261, 'baja', $3, $4, '0.1.0', '2026-08-06'
-     ) returning id`,
+  // 3. Fin de la entrevista: persistir respuestas + estado respondida (persistirRespuestas()).
+  const contenidoFicha = {
+    sector: { valor: 'taller mecánico', etiqueta: 'confirmado' },
+    tamano_rango: { valor: '1-9', etiqueta: 'confirmado' },
+    procesos: [{ nombre: 'presupuestos', tiempo_aprox: 'media hora x 6/día', dolor: 'repetir datos a mano', etiqueta: 'confirmado' }],
+  };
+  const resp = await db.query(
+    `insert into respuestas (
+       encuesta_id, contenido, sector, tamano_rango, madurez_digital, presupuesto_rango, decision_quien, coste_ia
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
     [
-      fichaId,
-      JSON.stringify({ renta_variable: 0.5, renta_fija: 0.4, liquidez: 0.1 }),
-      JSON.stringify({ modo: 'completo' }),
-      JSON.stringify([]),
+      encuestaId,
+      JSON.stringify(contenidoFicha),
+      'taller mecánico',
+      '1-9',
+      'baja',
+      '1k-5k',
+      'yo',
+      JSON.stringify({ entrevista: { input_tokens: 82000, output_tokens: 2300 }, diagnostico: null }),
     ],
   );
-  const informeId = informe.rows[0].id;
-  ok('informes: insert con las columnas de informeAFila() (incluido cartera_objetivo/contenido jsonb)');
+  const respuestaId = resp.rows[0].id;
+  ok('respuestas: insert con contenido jsonb + columnas promovidas + coste_ia (persistirRespuestas)');
 
-  await db.query(
-    `insert into planes (informe_id, secciones, markdown, descargo) values ($1, $2, $3, $4)`,
+  await db.query(`update encuestas set estado = 'respondida' where id = $1`, [encuestaId]);
+  ok("encuestas: update a estado 'respondida'");
+
+  // 4. Cierre: contacto → resultado → diagnóstico → estado completada (persistirCierre()).
+  const cont = await db.query(
+    `insert into contactos (nombre, email, telefono, empresa)
+     values ($1, $2, $3, $4) returning id`,
+    ['Ana López', 'ana@example.com', '600123123', 'Talleres López SL'],
+  );
+  const contactoId = cont.rows[0].id;
+  ok('contactos: insert con los cuatro campos not null');
+
+  await db.query(`update encuestas set contacto_id = $1 where id = $2`, [contactoId, encuestaId]);
+  ok('encuestas: enlace de contacto_id');
+
+  const res = await db.query(
+    `insert into resultados_rubrica (
+       respuesta_id, nivel_preparacion, completo, datos_faltantes, casos_uso, contenido, version_rubrica
+     ) values ($1, $2, $3, $4, $5, $6, $7) returning id`,
     [
-      informeId,
-      JSON.stringify([{ titulo: '1. Tu meta', contenido: 'Texto.' }]),
-      '## 1. Tu meta\nTexto.',
-      'Esto es orientación educativa...',
+      respuestaId,
+      'inicial',
+      false,
+      JSON.stringify([{ campo: 'uso_nube', para_que: 'señal de digitalización' }]),
+      JSON.stringify([
+        { id: 'presupuestos', nombre: 'Automatización de presupuestos', impacto: 4, viabilidad: 2, puntuacion: 8, justificacion: '…' },
+      ]),
+      JSON.stringify({ preparacion_score: 3, senales: { digitalizacion: 1, madurez_equipo: 1, claridad_procesos: 1 } }),
+      '2026-09-07',
     ],
   );
-  ok('planes: insert con las columnas de planAFila()');
+  const resultadoId = res.rows[0].id;
+  ok('resultados_rubrica: insert con nivel + completo + jsonb + version_rubrica');
 
-  await db.query(`update conversaciones set estado = 'completada', finalizada_en = now() where id = $1`, [
-    conversacionId,
-  ]);
-  ok('conversaciones: update a completada (cierre de persistirCierre())');
+  await db.query(
+    `insert into diagnosticos (resultado_id, markdown, secciones, nota_alcance)
+     values ($1, $2, $3, $4)`,
+    [
+      resultadoId,
+      '## Punto de partida\nTexto.',
+      JSON.stringify([{ titulo: 'Punto de partida', contenido: 'Texto.' }]),
+      'Esto es una orientación preliminar, no vinculante.',
+    ],
+  );
+  ok('diagnosticos: insert con markdown + secciones + nota_alcance');
 
-  // ── Casos negativos: las restricciones reales tienen que rechazar lo que deben rechazar ──────
-  console.log('\nRestricciones (tienen que fallar, si no fallan es un fallo de este script):');
+  await db.query(`update encuestas set estado = 'completada', finalizada_en = now() where id = $1`, [encuestaId]);
+  ok("encuestas: update a estado 'completada' + finalizada_en (cierre de persistirCierre)");
 
-  await esperarError(
-    'email duplicado en clientes rechazado por el unique',
-    () => db.query(`insert into clientes (nombre, email) values ('Otro', 'silvia@example.com')`),
+  // 5. Aviso al consultor (registrarNotificacionConsultor()).
+  await db.query(
+    `insert into notificaciones_consultor (encuesta_id, destinatario, enviado_en, estado)
+     values ($1, $2, now(), 'enviado')`,
+    [encuestaId, 'consultor@example.com'],
+  );
+  ok("notificaciones_consultor: insert estado 'enviado'");
+  await db.query(
+    `insert into notificaciones_consultor (encuesta_id, destinatario, enviado_en, estado)
+     values ($1, $2, null, 'fallido')`,
+    [encuestaId, 'consultor@example.com'],
+  );
+  ok("notificaciones_consultor: insert estado 'fallido' con enviado_en null");
+
+  // ── Cascada de borrado (cambio respecto al clon) ────────────────────────────
+  console.log('\nBorrado en cascada al eliminar una encuesta:');
+  await db.query(`delete from encuestas where id = $1`, [encuestaId]);
+  for (const [tabla, filtro, params] of [
+    ['respuestas', 'encuesta_id = $1', [encuestaId]],
+    ['resultados_rubrica', 'respuesta_id = $1', [respuestaId]],
+    ['diagnosticos', 'resultado_id = $1', [resultadoId]],
+    ['notificaciones_consultor', 'encuesta_id = $1', [encuestaId]],
+  ]) {
+    const { rows } = await db.query(`select count(*)::int as n from ${tabla} where ${filtro}`, params);
+    if (rows[0].n === 0) ok(`${tabla}: borrada en cascada`);
+    else fallo(`${tabla}: quedaron ${rows[0].n} filas tras borrar la encuesta`);
+  }
+
+  // ── Casos negativos ────────────────────────────────────────────────────────
+  console.log('\nRestricciones (tienen que fallar):');
+
+  await esperarError('contactos: email duplicado rechazado por el unique', async () => {
+    await db.query(`insert into contactos (nombre, email, telefono, empresa) values ('X','dup@example.com','1','Y')`);
+    await db.query(`insert into contactos (nombre, email, telefono, empresa) values ('Z','dup@example.com','2','W')`);
+  });
+
+  await esperarError('contactos: telefono not null', () =>
+    db.query(`insert into contactos (nombre, email, empresa) values ('X','ntn@example.com','Y')`),
   );
 
-  await esperarError(
-    'conversación sin consentimiento_en rechazada (not null)',
-    () => db.query(`insert into conversaciones (cliente_id) values (null)`),
+  await esperarError('encuestas: consentimiento_en not null', () =>
+    db.query(`insert into encuestas (consentimiento_version) values ('v1')`),
   );
 
-  await esperarError(
-    'ficha sin conversacion_id rechazada (not null)',
-    () => db.query(`insert into fichas (fecha_entrevista) values ('2026-08-27')`),
+  await esperarError('encuestas: consentimiento_version not null', () =>
+    db.query(`insert into encuestas (consentimiento_en) values (now())`),
   );
 
-  await esperarError(
-    'modo de informe fuera de la lista rechazado por el check',
-    () =>
-      db.query(
-        `insert into informes (ficha_id, modo, contenido, pendientes_reunion, version_motor, version_reglas)
-         values ($1, 'inventado', '{}', '[]', 'x', 'y')`,
-        [fichaId],
-      ),
+  await esperarError('encuestas: estado fuera del check rechazado', () =>
+    db.query(`insert into encuestas (consentimiento_en, consentimiento_version, estado) values (now(),'v1','inventado')`),
   );
 
-  await esperarError(
-    'deuda con ficha_id inexistente rechazada por la clave foránea',
-    () =>
-      db.query(
-        `insert into deudas (ficha_id, orden) values ('00000000-0000-0000-0000-000000000000', 1)`,
-      ),
+  await esperarError('respuestas: encuesta_id not null', () =>
+    db.query(`insert into respuestas (contenido) values ('{}'::jsonb)`),
+  );
+
+  {
+    const e2 = await db.query(`insert into encuestas (consentimiento_en, consentimiento_version) values (now(),'v1') returning id`);
+    await db.query(`insert into respuestas (encuesta_id, contenido) values ($1, '{}'::jsonb)`, [e2.rows[0].id]);
+    await esperarError('respuestas: una segunda fila para la misma encuesta rechazada (unique 1:1)', () =>
+      db.query(`insert into respuestas (encuesta_id, contenido) values ($1, '{}'::jsonb)`, [e2.rows[0].id]),
+    );
+  }
+
+  await esperarError('resultados_rubrica: respuesta_id inexistente rechazado por la FK', () =>
+    db.query(
+      `insert into resultados_rubrica (respuesta_id, nivel_preparacion, completo, casos_uso, contenido, version_rubrica)
+       values ('00000000-0000-0000-0000-000000000000','inicial',true,'[]'::jsonb,'{}'::jsonb,'v1')`,
+    ),
+  );
+
+  await esperarError('notificaciones_consultor: estado fuera del check rechazado', () =>
+    db.query(
+      `insert into notificaciones_consultor (encuesta_id, destinatario, estado)
+       select id, 'x@example.com', 'pendiente' from encuestas limit 1`,
+    ),
+  );
+
+  await esperarError('limites_uso: accion fuera del check rechazada', () =>
+    db.query(`insert into limites_uso (ip_hash, accion) values ('h','borrar_todo')`),
   );
 
   console.log(`\n${fallos === 0 ? 'Todo en orden.' : `${fallos} fallo(s).`}\n`);
   process.exit(fallos === 0 ? 0 : 1);
-}
-
-async function esperarError(descripcion, accion) {
-  try {
-    await accion();
-    fallo(descripcion, 'se esperaba que la escritura fallara, y no falló');
-  } catch {
-    ok(descripcion);
-  }
 }
 
 main().catch((error) => {

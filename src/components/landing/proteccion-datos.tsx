@@ -1,7 +1,6 @@
 /**
- * Nota de confianza sobre tratamiento de datos. No sustituye el consentimiento explícito de
- * M-06 (eso ocurre dentro del chat, antes de crear la conversación) — aquí solo se explica el
- * porqué, para que el visitante llegue a esa pantalla sin sorpresas.
+ * Nota de confianza sobre tratamiento de datos. No sustituye el consentimiento explícito de M-02
+ * (eso ocurre dentro del chat, antes de crear la encuesta) — aquí solo se explica el porqué.
  */
 export function ProteccionDatos() {
   return (
@@ -11,10 +10,11 @@ export function ProteccionDatos() {
           Tus datos, con cuidado
         </h2>
         <p className="mt-4 text-base leading-relaxed text-text-secondary">
-          Solo te pedimos tu nombre y tu email para que tu asesor pueda contactarte si quieres
-          seguir adelante — nada más. No compartimos tus datos con terceros, y antes de empezar
-          la entrevista te pedimos tu consentimiento explícito para tratarlos. Puedes pedir que
-          se eliminen cuando quieras.
+          Al terminar te pedimos tu nombre, tu email, tu teléfono y el de tu empresa para poder
+          revisar tu caso y contactarte si quieres seguir. Las respuestas y esos datos se guardan de
+          forma segura durante un máximo de 24 meses, no se comparten con terceros, y antes de
+          empezar te pedimos tu consentimiento explícito. Puedes pedir que se eliminen cuando
+          quieras.
         </p>
       </div>
     </section>

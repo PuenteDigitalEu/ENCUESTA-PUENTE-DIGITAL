@@ -1,21 +1,21 @@
 const pasos = [
   {
     numero: "1",
-    titulo: "Cuéntanos tu situación",
+    titulo: "Cuéntanos cómo trabajáis",
     descripcion:
-      "Responde unas preguntas sencillas sobre tus ingresos, tu ahorro y lo que quieres conseguir. Unos 10-15 minutos, a tu ritmo.",
+      "Responde unas preguntas sencillas sobre tu negocio: procesos, tareas repetitivas, herramientas y equipo. Unos 10 minutos, a tu ritmo.",
   },
   {
     numero: "2",
-    titulo: "Lo calculamos con reglas claras",
+    titulo: "Lo analizamos con criterio",
     descripcion:
-      "Nada de fórmulas mágicas ni cifras al azar: aplicamos el mismo criterio que usa tu asesor, con cálculos reales detrás de cada número.",
+      "Nada de valoraciones al azar: aplicamos siempre el mismo criterio para medir tu preparación y ordenar las oportunidades por impacto y por lo fácil que es ponerlas en marcha.",
   },
   {
     numero: "3",
-    titulo: "Recibe tu plan al momento",
+    titulo: "Recibe tu diagnóstico al momento",
     descripcion:
-      "Sin esperas ni segunda cita: ves tu diagnóstico y una propuesta orientativa en la misma conversación.",
+      "En la misma conversación ves tu nivel de preparación y una lista priorizada de automatizaciones por las que empezar.",
   },
 ];
 
@@ -32,9 +32,7 @@ export function ComoFunciona() {
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary font-display text-lg font-semibold text-white">
               {paso.numero}
             </span>
-            <h3 className="font-display text-lg font-semibold text-text-primary">
-              {paso.titulo}
-            </h3>
+            <h3 className="font-display text-lg font-semibold text-text-primary">{paso.titulo}</h3>
             <p className="text-base leading-relaxed text-text-secondary">{paso.descripcion}</p>
           </div>
         ))}

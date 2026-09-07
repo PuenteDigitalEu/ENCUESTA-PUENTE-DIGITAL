@@ -1,255 +1,197 @@
 -- 001_esquema_inicial.sql
 -- Esquema inicial del proyecto. Ver docs/data-model.md para el detalle narrativo de cada tabla,
 -- relación y política — este archivo es su traducción ejecutable, no una fuente nueva de criterio.
+--
+-- gen_random_uuid() es nativo desde Postgres 13.
 
--- gen_random_uuid() es nativo desde Postgres 13 (pgcrypto ya no hace falta para esto).
-
--- Reproduce la etiqueta que usan instrucciones-sistema.md / instrucciones-motor.md en cada dato
--- de la ficha: [confirmado|estimado|pendiente].
+-- Calidad de cada respuesta de la ficha: [confirmado | estimado | pendiente].
+-- No se usa como tipo de ninguna columna: las respuestas y sus etiquetas viven dentro de
+-- respuestas.contenido (jsonb). Se define aquí como vocabulario del dominio y por si una
+-- migración futura promueve algún campo a columna.
 create type dato_estado as enum ('confirmado', 'estimado', 'pendiente');
 
--- ── asesores ─────────────────────────────────────────────────────────────────
--- Lista blanca de quién puede ver el panel (S-01). Estar en esta tabla ES el permiso — no basta
--- con tener una cuenta de Supabase Auth válida (ver "Estrategia de autenticación" en architecture.md).
-create table asesores (
+-- ── consultores ──────────────────────────────────────────────────────────────
+-- Lista blanca de quién puede ver el panel (M-11). Estar en esta tabla ES el permiso — no basta
+-- con tener una cuenta de Supabase Auth válida (ver "Autenticación" en docs/architecture.md).
+create table consultores (
   id         uuid primary key references auth.users (id),
   nombre     text not null,
   creado_en  timestamptz not null default now()
 );
 
--- ── clientes ─────────────────────────────────────────────────────────────────
--- Se crea cuando el visitante da nombre y email dentro del chat, no antes (minimización RGPD).
--- Email normalizado a minúsculas antes de insertar, para enlazar leads repetidos en vez de duplicarlos.
-create table clientes (
+-- ── contactos ────────────────────────────────────────────────────────────────
+-- Se crea cuando el visitante rellena el formulario de contacto con los cuatro campos (M-08), no
+-- antes (minimización RGPD). Email normalizado a minúsculas antes de insertar, para enlazar a la
+-- misma persona si repite la encuesta en vez de duplicarla.
+create table contactos (
   id         uuid primary key default gen_random_uuid(),
-  nombre     text,
+  nombre     text not null,
   email      text not null unique,
+  telefono   text not null,
+  empresa    text not null,
   creado_en  timestamptz not null default now()
 );
 
--- ── conversaciones ───────────────────────────────────────────────────────────
--- Una fila por cada visitante que abre el chat, exista o no llegue a completarlo.
-create table conversaciones (
-  id                  uuid primary key default gen_random_uuid(),
-  cliente_id          uuid references clientes (id),
-  -- Secreto de la URL de esta sesión concreta; NO es una URL personalizada por destinatario
-  -- (eso sigue fuera de alcance, ver docs/prd.md) — es un identificador de sesión efímero.
-  token               uuid not null unique default gen_random_uuid(),
-  -- M-06: la conversación no existe sin consentimiento previo de tratamiento de datos.
-  consentimiento_en   timestamptz not null,
-  expira_en           timestamptz not null default (now() + interval '30 days'),
-  iniciada_en         timestamptz not null default now(),
-  finalizada_en       timestamptz,
-  estado              text not null default 'en_curso'
-                       check (estado in ('en_curso', 'completada', 'abandonada')),
-  turnos_totales      int not null default 0
+-- ── encuestas ────────────────────────────────────────────────────────────────
+-- Una fila por cada visitante que acepta el consentimiento y abre el chat, complete la encuesta o
+-- no.
+--
+-- estado:
+--   en_curso    → entrevista en marcha
+--   respondida  → entrevista terminada, respuestas persistidas, sin contacto ni diagnóstico
+--   completada  → cierre completo (contacto + resultado de rúbrica + diagnóstico)
+--   abandonada  → marcada por el job de retención al vencer expira_en
+create table encuestas (
+  id                     uuid primary key default gen_random_uuid(),
+  contacto_id            uuid references contactos (id),
+  -- Secreto de la sesión: es lo único que autoriza a /api/chat a escribir en esta encuesta.
+  -- NO es una URL personalizada por destinatario.
+  token                  uuid not null unique default gen_random_uuid(),
+  -- M-02: la encuesta no existe sin consentimiento previo de tratamiento de datos.
+  consentimiento_en      timestamptz not null,
+  -- Versión del texto de consentimiento aceptada, para auditar qué aceptó cada visitante.
+  consentimiento_version text not null,
+  expira_en              timestamptz not null default (now() + interval '30 days'),
+  iniciada_en            timestamptz not null default now(),
+  finalizada_en          timestamptz,
+  estado                 text not null default 'en_curso'
+                          check (estado in ('en_curso', 'respondida', 'completada', 'abandonada')),
+  turnos_totales         int not null default 0
 );
 
 -- ── limites_uso ──────────────────────────────────────────────────────────────
--- Protección contra abuso (ver architecture.md): la entrevista es pública y cada mensaje cuesta
--- dinero real en la API de Claude. Se guarda un hash de la IP, nunca la IP en claro.
+-- Protección contra abuso (docs/architecture.md → "Protección contra abuso"): la encuesta es
+-- pública y cada turno cuesta dinero real en la API de Claude. Se guarda un hash de la IP
+-- (HMAC-SHA256 con IP_HASH_PEPPER), nunca la IP en claro.
 create table limites_uso (
   id         bigint generated always as identity primary key,
   ip_hash    text not null,
-  accion     text not null check (accion in ('crear_conversacion', 'enviar_mensaje')),
+  accion     text not null check (accion in ('crear_encuesta', 'enviar_mensaje')),
   creado_en  timestamptz not null default now()
 );
 create index limites_uso_ip_hash_creado_en_idx on limites_uso (ip_hash, creado_en);
 
--- ── fichas ───────────────────────────────────────────────────────────────────
--- Una fila por conversación completada — las claves fijas del contrato de instrucciones-sistema.md,
--- salvo las deudas (tabla deudas aparte, por ser un grupo repetible) y el email (vive en clientes).
-create table fichas (
+-- ── respuestas ───────────────────────────────────────────────────────────────
+-- Una fila por encuesta que llega al final de la entrevista. Se persiste al detectar la ficha de
+-- cierre que emite Claude, antes del formulario de contacto.
+--
+-- contenido (jsonb) es la fuente canónica: el objeto RespuestasEncuesta de src/lib/rubrica/, con
+-- los ocho bloques y cada campo como { valor, etiqueta } (etiqueta ∈ dato_estado). Las columnas
+-- sueltas son copia desnormalizada de los campos que el panel filtra y el análisis de negocio
+-- agrega (ver docs/data-model.md → respuestas).
+create table respuestas (
   id                 uuid primary key default gen_random_uuid(),
-  conversacion_id    uuid not null unique references conversaciones (id),
+  encuesta_id        uuid not null unique references encuestas (id) on delete cascade,
+  contenido          jsonb not null,
 
-  nombre             text,
-  nombre_estado      dato_estado,
-  fecha_entrevista   date not null,
+  sector             text,
+  tamano_rango       text,
+  madurez_digital    text,
+  presupuesto_rango  text,
+  decision_quien     text,
 
-  ingresos_netos_mensual        numeric,
-  ingresos_netos_mensual_estado dato_estado,
-  ingresos_estabilidad          text check (ingresos_estabilidad in ('estable', 'variable')),
-  ingresos_estabilidad_estado   dato_estado,
+  -- usage de las llamadas a Claude de esta encuesta: { entrevista, diagnostico | null }.
+  -- diagnostico se rellena al cerrar; en estado respondida queda null.
+  coste_ia           jsonb not null default '{}'::jsonb,
 
-  gastos_fijos_mensual          numeric,
-  gastos_fijos_mensual_estado   dato_estado,
-
-  -- Fallback de instrucciones-motor.md C17 cuando el detalle completo de deudas queda pendiente.
-  deudas_interes_alto_declarado        text
-    check (deudas_interes_alto_declarado in ('si', 'no', 'no_facilitado')),
-  deudas_interes_alto_declarado_estado dato_estado,
-
-  patrimonio_liquido            numeric,
-  patrimonio_liquido_estado     dato_estado,
-  patrimonio_invertido          numeric,
-  patrimonio_invertido_estado   dato_estado,
-  patrimonio_distribucion       text,
-  patrimonio_distribucion_estado dato_estado,
-
-  aportacion_mensual_actual        numeric,
-  aportacion_mensual_actual_estado dato_estado,
-
-  colchon_meses         numeric,
-  colchon_meses_estado  dato_estado,
-
-  objetivo_proposito        text,
-  objetivo_proposito_estado dato_estado,
-  objetivo_importe          numeric,
-  objetivo_importe_estado   dato_estado,
-  objetivo_plazo_anios          numeric,
-  objetivo_plazo_anios_estado   dato_estado,
-
-  riesgo_tolerancia_declarada        text
-    check (riesgo_tolerancia_declarada in ('baja', 'media', 'alta')),
-  riesgo_tolerancia_declarada_estado dato_estado,
-  riesgo_comportamiento_real         text,
-  riesgo_comportamiento_real_estado  dato_estado,
-  -- Clasificado por la Fase 2 (agente): interpretar texto libre no es un calculo determinista.
-  riesgo_perfil_derivado        text
-    check (riesgo_perfil_derivado in ('conservador', 'moderado', 'dinamico')),
-  riesgo_perfil_derivado_estado dato_estado,
-
-  edad             int,
-  edad_estado      dato_estado,
-  personas_a_cargo         int,
-  personas_a_cargo_estado  dato_estado,
-  situacion_laboral        text,
-  situacion_laboral_estado dato_estado,
-
-  created_at timestamptz not null default now()
+  creado_en          timestamptz not null default now()
 );
 
--- ── deudas ───────────────────────────────────────────────────────────────────
--- Grupo repetible de la ficha (0 a N filas). deudas_numero = 0 (caso borde C9) se representa
--- como ausencia de filas, no como una fila especial.
-create table deudas (
-  id             uuid primary key default gen_random_uuid(),
-  ficha_id       uuid not null references fichas (id),
-  orden          int not null,
-  tipo           text,
-  tipo_estado    dato_estado,
-  importe        numeric,
-  importe_estado dato_estado,
-  cuota          numeric,
-  cuota_estado   dato_estado,
-  -- TAE en %. Decide si es "deuda cara" (R1, umbral 7-8%); pendiente si no se pudo ni estimar (C8).
-  interes        numeric,
-  interes_estado dato_estado
+-- ── resultados_rubrica ───────────────────────────────────────────────────────
+-- Salida de src/lib/rubrica/ (código determinista, M-05). Relación 1:1 con respuestas en esta
+-- versión; si se reprocesa la misma ficha con reglas nuevas, se versiona con una fila nueva.
+create table resultados_rubrica (
+  id                 uuid primary key default gen_random_uuid(),
+  respuesta_id       uuid not null references respuestas (id) on delete cascade,
+  -- sin_preparar | inicial | en_desarrollo | consolidada (ver docs/rubrica.md).
+  nivel_preparacion  text not null,
+  -- false si faltan respuestas que la rúbrica necesita (M-07).
+  completo           boolean not null,
+  datos_faltantes    jsonb not null default '[]'::jsonb,
+  -- Array ordenado por puntuación desc: { nombre, descripcion, impacto, viabilidad, puntuacion, justificacion }.
+  casos_uso          jsonb not null,
+  -- Salida completa de la rúbrica (incluye lo anterior + señales intermedias).
+  contenido          jsonb not null,
+  -- Trazabilidad: sin esto un resultado antiguo no se puede reproducir si las reglas cambian.
+  version_rubrica    text not null,
+  creado_en          timestamptz not null default now()
 );
-create index deudas_ficha_id_idx on deudas (ficha_id);
+create index resultados_rubrica_respuesta_id_idx on resultados_rubrica (respuesta_id);
 
--- ── informes ─────────────────────────────────────────────────────────────────
--- Diagnóstico técnico interno generado por lib/motor/ (instrucciones-motor.md §7). Relación 1:1
--- con fichas en esta versión; si se reprocesa la misma ficha, se versiona con una fila nueva.
-create table informes (
+-- ── diagnosticos ─────────────────────────────────────────────────────────────
+-- Lo que de verdad ve el visitante en el chat. Separado de resultados_rubrica a propósito: uno es
+-- el registro técnico, el otro su traducción entregada.
+create table diagnosticos (
   id            uuid primary key default gen_random_uuid(),
-  ficha_id      uuid not null references fichas (id),
-  modo          text not null check (modo in ('completo', 'condicionado', 'suspendido')),
-  tipo_meta     text
-    check (tipo_meta in ('patrimonio', 'renta_cartera', 'renta_negocio', 'mixta_ambigua')),
-
-  flujo_libre                  numeric,
-  porcentaje_camino_recorrido  numeric,
-  proyeccion_valor_futuro      numeric,
-  gap_euros                    numeric,
-  gap_anios                    numeric,
-  aportacion_propuesta         numeric,
-  cartera_objetivo             jsonb,
-  rentabilidad_esperada_neta   numeric,
-
-  -- Monte Carlo (R10, M-07) — nulos si el caso no cumple meta convertible + modo completo.
-  mc_percentil_pesimista       numeric,
-  mc_percentil_central         numeric,
-  mc_percentil_optimista       numeric,
-  mc_probabilidad_cumplimiento numeric,
-  mc_banda                     text check (mc_banda in ('alta', 'razonable', 'fragil', 'baja')),
-
-  contenido           jsonb not null,
-  pendientes_reunion  jsonb not null default '[]'::jsonb,
-
-  -- Trazabilidad: sin esto, un informe antiguo es imposible de reproducir si las reglas cambian.
-  version_motor   text not null,
-  version_reglas  text not null,
-
-  created_at timestamptz not null default now()
+  resultado_id  uuid not null references resultados_rubrica (id) on delete cascade,
+  -- Redactado por Claude a partir del resultado YA calculado (M-06).
+  markdown      text not null,
+  -- El markdown descompuesto por encabezados ##, mecánicamente.
+  secciones     jsonb not null,
+  -- Texto fijo "orientación preliminar, no vinculante" (M-13), guardado con el diagnóstico para
+  -- auditar qué vio cada visitante.
+  nota_alcance  text not null,
+  generado_en   timestamptz not null default now()
 );
-create index informes_ficha_id_idx on informes (ficha_id);
+create index diagnosticos_resultado_id_idx on diagnosticos (resultado_id);
 
--- ── planes ───────────────────────────────────────────────────────────────────
--- Lo que de verdad ve el visitante (Fase 4, instrucciones-motor.md §8) — separado de informes a
--- propósito: informes es el registro técnico interno, planes es su traducción ya entregada.
-create table planes (
-  id           uuid primary key default gen_random_uuid(),
-  informe_id   uuid not null references informes (id),
-  secciones    jsonb not null,
-  markdown     text not null,
-  -- Texto exacto del disclaimer mostrado con este plan, guardado con el plan (no solo con la
-  -- plantilla), para auditar después qué vio cada visitante.
-  descargo     text not null,
-  generado_en  timestamptz not null default now()
-);
-create index planes_informe_id_idx on planes (informe_id);
-
--- ── notificaciones_asesor ────────────────────────────────────────────────────
--- Registro del aviso automático (M-05), para poder confirmar que se envió y depurar fallos.
-create table notificaciones_asesor (
+-- ── notificaciones_consultor ─────────────────────────────────────────────────
+-- Registro del aviso automático por email (M-10), para confirmar envíos y depurar fallos. Un
+-- fallo se registra como 'fallido', no se reintenta ni bloquea al visitante (RNF-07).
+create table notificaciones_consultor (
   id                uuid primary key default gen_random_uuid(),
-  conversacion_id   uuid not null references conversaciones (id),
+  encuesta_id       uuid not null references encuestas (id) on delete cascade,
   destinatario      text not null,
   enviado_en        timestamptz,
   estado            text not null check (estado in ('enviado', 'fallido')),
   creado_en         timestamptz not null default now()
 );
-create index notificaciones_asesor_conversacion_id_idx on notificaciones_asesor (conversacion_id);
+create index notificaciones_consultor_encuesta_id_idx on notificaciones_consultor (encuesta_id);
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- Row Level Security
 -- ══════════════════════════════════════════════════════════════════════════════
--- Ningún visitante habla con Supabase directamente: todas las escrituras pasan por app/api/chat/
+-- Ningún visitante habla con Supabase directamente: todas las escrituras pasan por src/app/api/
 -- en el servidor, con la clave de servicio (que no pasa por RLS). Por eso ninguna tabla lleva
 -- policy de INSERT/UPDATE/DELETE para "authenticated" ni "anon" — todas las escrituras vienen del
--- backend. Solo se conceden policies de SELECT, y solo a quien está en la tabla asesores.
+-- backend. Solo se conceden policies de SELECT, y solo a quien está en la tabla consultores.
 
-alter table asesores               enable row level security;
-alter table clientes               enable row level security;
-alter table conversaciones         enable row level security;
-alter table limites_uso            enable row level security;
-alter table fichas                 enable row level security;
-alter table deudas                 enable row level security;
-alter table informes               enable row level security;
-alter table planes                 enable row level security;
-alter table notificaciones_asesor  enable row level security;
+alter table consultores               enable row level security;
+alter table contactos                 enable row level security;
+alter table encuestas                 enable row level security;
+alter table limites_uso               enable row level security;
+alter table respuestas                enable row level security;
+alter table resultados_rubrica        enable row level security;
+alter table diagnosticos              enable row level security;
+alter table notificaciones_consultor  enable row level security;
 
--- Estar en la tabla asesores ES el permiso — no basta con que auth.uid() devuelva un valor.
--- security definer + search_path fijo: patrón recomendado de Supabase para evitar que la función
+-- Estar en la tabla consultores ES el permiso — no basta con que auth.uid() devuelva un valor.
+-- security definer + search_path fijo: patrón recomendado de Supabase para que la función no
 -- quede sujeta a las RLS de la tabla que consulta (si no, se autobloquearía).
-create function es_asesor()
+create function es_consultor()
 returns boolean
 language sql
 security definer
 set search_path = public
 stable
 as $$
-  select exists (select 1 from asesores where id = auth.uid());
+  select exists (select 1 from consultores where id = auth.uid());
 $$;
 
-create policy "asesores_select" on asesores
-  for select to authenticated using (es_asesor());
-create policy "clientes_select" on clientes
-  for select to authenticated using (es_asesor());
-create policy "conversaciones_select" on conversaciones
-  for select to authenticated using (es_asesor());
-create policy "fichas_select" on fichas
-  for select to authenticated using (es_asesor());
-create policy "deudas_select" on deudas
-  for select to authenticated using (es_asesor());
-create policy "informes_select" on informes
-  for select to authenticated using (es_asesor());
-create policy "planes_select" on planes
-  for select to authenticated using (es_asesor());
-create policy "notificaciones_asesor_select" on notificaciones_asesor
-  for select to authenticated using (es_asesor());
+create policy "consultores_select" on consultores
+  for select to authenticated using (es_consultor());
+create policy "contactos_select" on contactos
+  for select to authenticated using (es_consultor());
+create policy "encuestas_select" on encuestas
+  for select to authenticated using (es_consultor());
+create policy "respuestas_select" on respuestas
+  for select to authenticated using (es_consultor());
+create policy "resultados_rubrica_select" on resultados_rubrica
+  for select to authenticated using (es_consultor());
+create policy "diagnosticos_select" on diagnosticos
+  for select to authenticated using (es_consultor());
+create policy "notificaciones_consultor_select" on notificaciones_consultor
+  for select to authenticated using (es_consultor());
 
--- limites_uso no lleva policy de SELECT: ni siquiera el asesor necesita leerla desde el cliente.
+-- limites_uso no lleva policy de SELECT: ni siquiera el consultor necesita leerla desde el cliente.
