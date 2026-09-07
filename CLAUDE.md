@@ -126,7 +126,7 @@ al empezar una sesión para saber qué hay en marcha (ver "Ciclo de trabajo de u
 - IA conversacional: Anthropic Claude API
 - Estilos: Tailwind CSS
 - Despliegue: Vercel
-- Otras integraciones: Supabase (Edge Function + SMTP) para el email de aviso al asesor
+- Otras integraciones: Resend (API HTTP directa) para el email de aviso al asesor
 
 Detalle completo, justificación de cada decisión y diagrama de componentes en
 `docs/architecture.md`.
