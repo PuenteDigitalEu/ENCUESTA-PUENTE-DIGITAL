@@ -55,7 +55,7 @@ dado). Sin mencionar precios.
 ## Qué NO hacer
 
 - No añadas una nota legal ni un descargo al final: el sistema la añade aparte.
-- No inventes el nombre de la marca.
+- Si nombras la marca, es **Puente Digital EU**.
 - No uses la palabra "necesidad" como etiqueta ("tu necesidad es ALTA"): habla de "margen" o
   "recorrido".
 - No menciones asesoramiento financiero ni de inversión.

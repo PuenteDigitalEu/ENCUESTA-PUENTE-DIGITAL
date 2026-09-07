@@ -102,10 +102,10 @@ listado y detalle. Recorrido manual con cuenta real.
 ### F7 · Landing, copy y accesibilidad
 **Cierra:** `M-15`, `RNF-05` · **Depende de:** 0.7
 Reescribir el copy de `Hero`, `ComoFunciona`, `ProteccionDatos`, `Footer`, `DisclosureBanner` y
-`metadata`. `[Nombre de la marca]` como marcador. Anillo de foco en inputs/botones/filas;
+`metadata` con la marca **Puente Digital EU**. Anillo de foco en inputs/botones/filas;
 `prefers-reduced-motion` en el scroll del chat; `<label>` en el formulario.
 **Puerta:** revisión de accesibilidad (contraste AA, teclado, foco); sin cadenas fuera de español;
-sin menciones a inversión regulada.
+sin menciones a inversión regulada. **Pasada ligera hecha (2026-09-07); falta favicon y repaso fino.**
 
 ### Cierre de la Fase 1
 - Recorrido manual completo (visitante + panel) contra `localhost`, evidencia en el PR.

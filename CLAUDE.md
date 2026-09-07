@@ -99,9 +99,10 @@ cerrarla le devuelve en el propio chat un diagnóstico de preparación para IA y
 priorizada de posibles automatizaciones/implantaciones. Cada encuesta completada dispara un aviso
 por email. Stack heredado del clon: Next.js + Supabase + Claude API + Vercel.
 
-**Nombre:** sin decidir (carpeta de trabajo: `encuesta-ia`).
-**Descripción:** por redactar cuando el PRD esté acordado.
-**Estado actual:** clon del stack recién hecho; documentación de `docs/` por escribir.
+**Nombre:** Puente Digital EU (carpeta de trabajo: `encuesta-ia`).
+**Descripción:** ver `docs/prd.md`.
+**Estado actual:** documentación de `docs/` vigente; encuesta implementada de punta a punta y
+probada en local (falta panel del consultor, email real y verificación de fichas).
 
 ---
 
@@ -306,7 +307,8 @@ Si la carpeta `mejoras/` no existe, créala.
   stack esté decidido en `docs/architecture.md` — dar de alta el MCP de Supabase según el
   "Protocolo de MCPs". El `.mcp.json` viene sin servidores a propósito. **Nunca** apuntes nada de
   este repo al proyecto de la asesoría.
-- El nombre comercial / marca está sin decidir. No inventes uno en el copy hasta que se confirme.
+- El nombre comercial / marca es **Puente Digital EU**. Escríbelo así, sin abreviar. Logo, favicon
+  y dominio siguen pendientes.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

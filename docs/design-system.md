@@ -17,7 +17,7 @@ contenido cambia.**
 |-------------|--------|
 | Tokens de color, tipografía (Sora/Inter), radios, contenedores, `.tabular-figures`. | Todo el **copy**: es de asesoría financiera. |
 | `CtaButton`, `ChatBubble`, `MarkdownLite`, estructura de `ConsentScreen`, layout de landing. | El **disclaimer regulatorio de inversión** desaparece: `DisclosureBanner` pasa a decir "orientación preliminar, no vinculante" (`M-13`). |
-| Patrón "card propia, no una burbuja más" para avisos. | El placeholder `[Nombre de la asesoría]` → `[Nombre de la marca]`. |
+| Patrón "card propia, no una burbuja más" para avisos. | `[Nombre de la asesoría]` → **Puente Digital EU**. |
 | Paleta de estados (success/error/warning). | Se añaden superficies nuevas: formulario de contacto, panel del consultor, diagnóstico de IA. |
 
 ## 2. Principios
@@ -34,13 +34,12 @@ contenido cambia.**
 
 ## 3. Marca
 
-**Sin decidir.** En todo el copy se usa el marcador `[Nombre de la marca]` (o `[la marca]` en
-frase). **No se inventa un nombre** hasta que el usuario lo confirme. Cuando se decida: se sustituye
-en landing (`Hero`, `Footer`), en `metadata` de `layout.tsx`, en el asunto del email de aviso y en
-el texto de consentimiento.
+**Nombre: Puente Digital EU** (decidido 2026-09-07). Se escribe así, tal cual, en todo el copy y
+en los prompts (`guion-entrevista.md`, `instrucciones-sistema.md`). Ya sustituido en landing
+(`Hero`, `Footer`), `metadata` de `layout.tsx` y el remitente por defecto del email.
 
-Logo, favicon y dominio también pendientes. El `favicon.ico` heredado es el de la asesoría — se
-reemplaza al tener marca.
+Logo, favicon y dominio siguen pendientes. El `favicon.ico` heredado es el de la asesoría — se
+reemplaza cuando haya identidad visual.
 
 ## 4. Tokens de color
 
@@ -187,12 +186,12 @@ dependencia de runtime) — decisión menor, se toma en la feature del panel.
   productividad".
 - **La nota de alcance** ("orientación preliminar, no vinculante") acompaña siempre al
   diagnóstico, en `text-xs`/`text-sm text-secondary`, sin alarmismo.
-- **Nombre de la marca:** `[Nombre de la marca]` hasta que se decida.
+- **Nombre de la marca:** Puente Digital EU.
 
 ## 12. Qué NO hacer
 
 - No reintroducir disclaimers de inversión ni lenguaje regulatorio financiero.
-- No inventar el nombre de la marca en el copy.
+- No abreviar ni alterar el nombre de la marca: es "Puente Digital EU".
 - No usar colores, radios ni sombras fuera de los tokens de §4–§6.
 - No animaciones de entrada, parallax, contadores animados ni barras de progreso decorativas.
 - No sustituir `<label>` por `placeholder`, ni `<table>` por `div`s en el panel.

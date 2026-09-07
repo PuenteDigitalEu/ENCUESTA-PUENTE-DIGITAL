@@ -15,9 +15,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Diagnóstico de preparación para IA",
+  title: "Puente Digital EU · Diagnóstico de preparación para IA",
   description:
-    "Encuesta conversacional que evalúa la preparación de una pyme o autónomo para implantar IA y propone por dónde empezar.",
+    "Encuesta conversacional de Puente Digital EU que evalúa la preparación de una pyme o autónomo para implantar IA y propone por dónde empezar.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,9 +1,6 @@
 import { CtaButton } from "./cta-button";
 
-/**
- * M-01: presentación y punto de entrada al chat. `[Nombre de la marca]` es un placeholder
- * deliberado — el nombre comercial está pendiente de decidir (docs/design-system.md §3).
- */
+/** M-01: presentación y punto de entrada al chat. */
 export function Hero() {
   return (
     <section className="bg-surface">
@@ -17,7 +14,7 @@ export function Hero() {
         </h1>
 
         <p className="max-w-xl text-lg leading-relaxed text-text-secondary">
-          Responde unas preguntas sobre cómo trabaja tu negocio y <strong>[Nombre de la marca]</strong>{" "}
+          Responde unas preguntas sobre cómo trabaja tu negocio y <strong>Puente Digital EU</strong>{" "}
           te devuelve al momento una lectura de tu preparación para la IA y una lista de
           automatizaciones por las que empezar — sin cita previa, sin compromiso.
         </p>

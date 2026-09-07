@@ -35,7 +35,7 @@ export async function enviarAvisoConsultor(
     throw new Error("RESEND_API_KEY no está configurada. Rellénala en .env.local (ver .env.example).");
   }
 
-  const from = process.env.RESEND_FROM ?? "Encuesta IA <onboarding@resend.dev>";
+  const from = process.env.RESEND_FROM ?? "Puente Digital EU <onboarding@resend.dev>";
 
   const respuesta = await fetch("https://api.resend.com/emails", {
     method: "POST",
