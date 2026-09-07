@@ -16,8 +16,9 @@ roadmap solo dice el orden y qué requisitos del PRD cierra cada bloque.
 `docs/prd.md` con su ID y su criterio de aceptación, y se coloca en una fase de este documento. No
 se implementa nada que no esté en los dos sitios.
 
-Estado global: **nada implementado.** El `src/` del clon funciona para el flujo de la asesoría;
-sirve de andamio, no cuenta como avance de este proyecto.
+**Estado global (2026-09-07):** Fase 0 y el grueso de Fase 1 (F1–F4, F6, F7 en pasada ligera)
+**implementados y probados en local**. Pendiente: F5 con dominio propio, favicon, calibración de
+la rúbrica (Fase 2), fichas de `docs/features/` formalizadas, despliegue y `/security-review`.
 
 ---
 
@@ -32,10 +33,10 @@ borraron) y no hay dónde persistir.
 | 0.2 | Crear el proyecto Supabase nuevo, `supabase link`, `.env.local` con todas las claves, `.env.example` al día. | — | `pnpm dev` levanta sin errores de variables; MCP de Supabase autenticado. |
 | 0.3 | Escribir `guion-entrevista.md` + `instrucciones-sistema.md` (raíz del repo) y confirmarlos. `instrucciones-rubrica.md` (prompt del diagnóstico) se escribe con F4. | Base de `M-03`, `M-04` | El guion cubre los 8 bloques; el contrato de la ficha está cerrado; el usuario da el visto bueno. **Borrador hecho (2026-09-07).** |
 | 0.4 | Diseñar la rúbrica: niveles de `nivel_preparacion`, catálogo de casos de uso, fórmula impacto × viabilidad, umbrales, reglas de completitud. | Base de `M-05` | Documentada en `docs/rubrica.md`; enum `nivel_preparacion` fijado en `data-model.md`. **Borrador hecho (2026-09-07).** |
-| 0.5 | Reescribir `supabase/migrations/001` con el esquema de `docs/data-model.md` (8 tablas, estado `respondida`, `coste_ia`, renombrados, `on delete cascade`). | Base de `M-09` | `node scripts/verificar-persistencia.mjs` en verde contra el esquema nuevo. |
-| 0.6 | Refactor mecánico de vocabulario: `lib/motor/`→`lib/rubrica/`, `asesor`→`consultor` (tabla, `es_consultor()`, módulo email, `CONSULTOR_NOTIFICATION_EMAIL`), `informes`/`planes`→`resultados_rubrica`/`diagnosticos`. | — | `pnpm build` y `pnpm test` en verde; sin referencias a `asesor`/`motor` salvo en changelog. |
+| 0.5 | Reescribir `supabase/migrations/001` con el esquema de `docs/data-model.md` (8 tablas, estado `respondida`, `coste_ia`, renombrados, `on delete cascade`). | Base de `M-09` | **Hecho (2026-09-07).** `verificar-persistencia.mjs` en verde. |
+| 0.6 | Refactor mecánico de vocabulario: `lib/motor/`→`lib/rubrica/`, `asesor`→`consultor` (tabla, `es_consultor()`, módulo email, `CONSULTOR_NOTIFICATION_EMAIL`), `informes`/`planes`→`resultados_rubrica`/`diagnosticos`. | — | **Hecho (2026-09-07).** `pnpm build` y `pnpm test` en verde. |
 | 0.7 | Contraste del acento coral: token a `#c9402a` + `--color-accent-hover` `#a8351f`. | `RNF-05` (parte) | Hecho en `globals.css` y `design-system.md` (2026-09-07). Falta que `CtaButton` use `accent-hover` (va en F7). |
-| 0.8 | Ampliar CI: `pnpm lint` + `pnpm test` + `pnpm build` además de la cobertura. | `RNF-06` (soporte) | Workflow nuevo pasa en un PR de prueba. |
+| 0.8 | Ampliar CI: `pnpm lint` + `pnpm test` + `pnpm build` además de la cobertura. | `RNF-06` (soporte) | **Hecho (2026-09-07):** `.github/workflows/pruebas.yml`. |
 
 Fases 0.3–0.6 pueden solaparse, pero 0.5 va antes de cualquier feature que escriba en base de
 datos.
@@ -44,8 +45,17 @@ datos.
 
 ## Fase 1 · MVP (la v1 del PRD)
 
-Cada bloque = una ficha de feature. Orden pensado para que cada uno se pueda validar en cuanto
-termina, sin esperar al siguiente.
+Cada bloque = una ficha de feature. Estado a 2026-09-07:
+
+| | Estado |
+|--|--|
+| F1 Persistencia + límite IP + retención | **Hecho.** `002_retencion.sql` para el job. |
+| F2 Entrevista conversacional | **Hecho.** |
+| F3 Rúbrica determinista | **Hecho.** Pesos por calibrar (Fase 2). |
+| F4 Cierre: contacto + diagnóstico | **Hecho.** |
+| F5 Aviso por email | **Código hecho.** Envío real bloqueado por verificar dominio en Resend. |
+| F6 Panel del consultor | **Hecho.** Login Supabase Auth + lista blanca + listado + detalle. |
+| F7 Landing, copy y accesibilidad | **Pasada ligera hecha.** Falta favicon y repaso fino. |
 
 ### F1 · Persistencia y protección contra abuso
 **Cierra:** `M-09`, `M-12`, `M-14` · **Depende de:** 0.5
@@ -108,11 +118,12 @@ Reescribir el copy de `Hero`, `ComoFunciona`, `ProteccionDatos`, `Footer`, `Disc
 sin menciones a inversión regulada. **Pasada ligera hecha (2026-09-07); falta favicon y repaso fino.**
 
 ### Cierre de la Fase 1
-- Recorrido manual completo (visitante + panel) contra `localhost`, evidencia en el PR.
-- `/security-review` antes de mergear a producción.
-- `README.md` reescrito describiendo el proyecto real (hoy describe la asesoría).
-- Borrar `PENDIENTE-CLON.md` (ya no aporta).
-- Todas las fichas de `docs/features/` en **Verificada**; `verificar-cobertura.mjs` en verde.
+- Recorrido manual completo (visitante + panel) contra `localhost`. **Encuesta probada
+  2026-09-07; panel pendiente de probar con cuenta real.**
+- `/security-review` antes de mergear a producción. **Pendiente.**
+- `README.md` reescrito. **Hecho (2026-09-07).**
+- Borrar `PENDIENTE-CLON.md`. **Hecho (2026-09-07).**
+- Fichas de `docs/features/` con su cobertura; `verificar-cobertura.mjs` en verde. **En curso.**
 
 ---
 

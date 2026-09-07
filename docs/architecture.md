@@ -12,11 +12,10 @@
 Este documento describe **sobre qué** se construye la v1: componentes, stack, cómo fluye una
 encuesta en tiempo de ejecución, dónde vive cada dato y qué decisiones técnicas se toman y por qué.
 
-El repo es un **clon** del stack de `landing-agente-financiero`. Gran parte de la infraestructura
-(bucle de turnos, persistencia por token, límite por IP, aviso por email) se reaprovecha; la lógica
-de dominio (guion de entrevista, rúbrica, diagnóstico) se reescribe. `PENDIENTE-CLON.md` detalla la
-frontera. Cuando este documento y ese estén de acuerdo y `docs/` esté montado, `PENDIENTE-CLON.md`
-se borra.
+El origen fue un clon del stack de `landing-agente-financiero`: se reaprovechó la infraestructura
+(bucle de turnos, persistencia por token, límite por IP, aviso por email) y se reescribió la
+lógica de dominio (guion, rúbrica, diagnóstico) y el esquema. La reescritura está hecha; no queda
+flujo financiero.
 
 ## 2. Componentes
 
@@ -264,14 +263,31 @@ Ninguna clave real se escribe en `.mcp.json` (se commitea): va `${VARIABLE}` y e
 
 ## 11. Despliegue
 
-- **Vercel** para la app. El botón lo pulsa el usuario (límite de ejecución 2 del proyecto): el
-  agente prepara y explica, no despliega.
-- **Supabase**: proyecto nuevo, propio de este repo. `supabase link` rellena `project_id` en
-  `supabase/config.toml`. Migraciones en `supabase/migrations/`. **Nunca** apuntar nada de este
-  repo al proyecto de la asesoría.
-- CI: `.github/workflows/cobertura.yml` corre `verificar-cobertura.mjs` en cada PR. En la Fase 0
-  del roadmap se añade un segundo workflow con `pnpm lint` + `pnpm test` + `pnpm build` (todo
-  mockeado, sin credenciales) — ver `docs/testing.md` §6.
+El botón lo pulsa el responsable del proyecto (límite de ejecución 2): el agente prepara, explica
+y deja listo. Pasos:
+
+1. **GitHub.** Subir el repo a un repositorio propio (`git remote add origin …` + `git push -u
+   origin main`).
+2. **Vercel.** New Project → importar ese repo. Framework: Next.js (autodetección). Sin ajustes de
+   build especiales.
+3. **Variables de entorno en Vercel** (Project Settings → Environment Variables), las mismas de
+   `.env.example`: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM`
+   (remitente de un dominio verificado en Resend), `CONSULTOR_NOTIFICATION_EMAIL`, `IP_HASH_PEPPER`
+   (uno nuevo para producción), `NEXT_PUBLIC_APP_URL` (la URL pública de Vercel o el dominio
+   propio).
+4. **Base de datos de producción.** Aplicar `supabase/migrations/001_esquema_inicial.sql` y
+   `002_retencion.sql` en el SQL Editor del proyecto Supabase. Dar de alta el consultor del panel
+   (usuario en Supabase Auth + fila en `consultores`).
+5. **Dominio.** Si hay dominio propio, añadirlo en Vercel (Domains) y verificar el subdominio de
+   envío en Resend con los registros DNS que indique.
+6. **Antes de mergear a producción:** `/security-review`.
+
+- **CI:** `.github/workflows/cobertura.yml` (tablas de cobertura) y `.github/workflows/pruebas.yml`
+  (`pnpm lint` + `pnpm test` + `pnpm build`, sin credenciales reales) corren en cada PR.
+- **`supabase link`** (rellena `project_id` en `config.toml`) solo hace falta si se aplican
+  migraciones vía CLI; con el SQL Editor no es necesario.
+- **Nunca** apuntar nada de este repo al proyecto Supabase de la asesoría.
 
 ## 12. MCPs del proyecto
 

@@ -1,0 +1,42 @@
+# Lint + tests + build en cada pull request y push a main. Complementa a cobertura.yml
+# (que valida las tablas de cobertura de docs/features/). Ver docs/testing.md §6.
+
+name: Pruebas
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    name: lint · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - run: pnpm test
+
+      # Valores de relleno: el build no llama a ningún servicio, solo necesita que las variables
+      # NEXT_PUBLIC_* existan para inlinearlas. Nada real vive aquí.
+      - run: pnpm build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ci.example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          NEXT_PUBLIC_APP_URL: http://localhost:3000

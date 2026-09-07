@@ -3,25 +3,22 @@
 Archivo de referencia para cualquier agente de codificación que trabaje en este proyecto.
 Lee este archivo completo antes de hacer cualquier cambio.
 
-## Estado del proyecto y arranque
+## Estado del proyecto
 
-La documentación de `docs/` está **vacía a propósito**. Este repositorio es un **clon del stack** de
-otro proyecto ya en producción (una landing con agente conversacional de diagnóstico), reaprovechado
-como base para uno nuevo: una **encuesta conversacional sobre la necesidad de implantar IA
-(automatizaciones u otras) en una pyme o autónomo**. Todavía no se ha definido el detalle de qué se
-construye aquí.
+El repo empezó como clon del stack de `landing-agente-financiero` y se reescribió para
+**Puente Digital EU**: una encuesta conversacional que evalúa la preparación de una pyme o
+autónomo para implantar IA. Estado a 2026-09-07:
 
-**No escribas código ni rellenes documentación todavía.** Empieza por la pregunta "¿Qué quieres
-construir y para quién?", decide con esa respuesta qué documentos de `docs/` necesita el proyecto
-según la tabla de la sección siguiente, y confírmalos con el usuario uno a uno antes de pasar al
-siguiente.
+- Los **ocho documentos de `docs/`** (más `docs/rubrica.md`) están **vigentes**. Léelos antes de
+  tocar nada.
+- La **encuesta funciona de punta a punta** en local: `guion-entrevista.md` +
+  `instrucciones-sistema.md` (entrevista), `src/lib/rubrica/` (cálculo determinista),
+  `instrucciones-rubrica.md` (redacción del diagnóstico), `/api/{conversacion,chat,cierre}`,
+  panel del consultor en `/panel`.
+- **Pendiente:** verificar el email con dominio propio en Resend, desplegar en Vercel, calibrar la
+  rúbrica con encuestas reales (Fase 2), y las mejoras `S-01`/`C-*` del roadmap.
 
-Lee primero **`PENDIENTE-CLON.md`** (raíz del repo): lista qué se hereda del stack tal cual, qué hay
-que reescribir y qué borrar. Si algo de la documentación heredada contradice lo que te pide el
-usuario, dilo antes de actuar.
-
-Si algo no cuadra (falta configuración, los tests no arrancan, hay fichas colgadas), `/doctor` da
-el parte completo del estado del proyecto y del entorno.
+`docs/roadmap.md` manda sobre qué toca a continuación. `/doctor` da el parte del entorno.
 
 ---
 
@@ -297,15 +294,12 @@ Si la carpeta `mejoras/` no existe, créala.
 
 ## Notas adicionales
 
-- **Este repo es un clon.** Se copió del stack de `landing-agente-financiero` (asesoría financiera,
-  en producción) el 2026-09-06, quitando su documentación, su changelog, sus fixtures y la capa de
-  vigilancia de mercado. El código de `src/` viene entero y funcionando para el flujo de la
-  asesoría; sirve de andamio, no de especificación. `PENDIENTE-CLON.md` detalla qué se reaprovecha,
-  qué se reescribe y qué se borra.
-- **No hay proyecto Supabase para este repo todavía.** Hay que crear uno nuevo y enlazarlo
-  (`supabase link`), poner sus valores en `.env.local` y en `.env.example` (vacío), y — cuando el
-  stack esté decidido en `docs/architecture.md` — dar de alta el MCP de Supabase según el
-  "Protocolo de MCPs". El `.mcp.json` viene sin servidores a propósito. **Nunca** apuntes nada de
+- **El origen fue un clon** de `landing-agente-financiero` (2026-09-06). Ya no queda flujo
+  financiero en `src/`: se reescribió entero para la encuesta de preparación para IA. Si ves
+  restos de vocabulario financiero en algún sitio, es un olvido — corrígelo.
+- **Proyecto Supabase propio**, ya creado y con las claves en `.env.local`. Migraciones en
+  `supabase/migrations/` (`001` esquema, `002` retención); se aplican desde el SQL Editor de
+  Supabase. MCP de Supabase de alcance `project` en `.mcp.json` (OAuth). **Nunca** apuntes nada de
   este repo al proyecto de la asesoría.
 - El nombre comercial / marca es **Puente Digital EU**. Escríbelo así, sin abreviar. Logo, favicon
   y dominio siguen pendientes.
