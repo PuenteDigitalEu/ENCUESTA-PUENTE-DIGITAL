@@ -3,9 +3,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { generarDiagnostico, NOTA_ALCANCE } from "@/lib/claude/diagnostico";
 import { enviarAvisoConsultor } from "@/lib/email/aviso-consultor";
+import { hashIp, obtenerIpVisitante, UMBRAL_ENVIAR_MENSAJE, VENTANA_HORAS } from "@/lib/ip";
 import { calcularRubrica } from "@/lib/rubrica";
 import { clienteSupabase } from "@/lib/supabase/server";
 import {
+  comprobarLimiteUso,
   leerRespuestas,
   persistirCierre,
   registrarNotificacionConsultor,
@@ -44,6 +46,26 @@ export async function POST(request: Request) {
   }
 
   const supabase = clienteSupabase();
+
+  try {
+    const ipHash = hashIp(obtenerIpVisitante(request));
+    const permitido = await comprobarLimiteUso(
+      supabase,
+      ipHash,
+      "enviar_mensaje",
+      UMBRAL_ENVIAR_MENSAJE,
+      VENTANA_HORAS,
+    );
+    if (!permitido) {
+      return NextResponse.json(
+        { error: "Demasiadas peticiones desde aquí. Inténtalo más tarde." },
+        { status: 429 },
+      );
+    }
+  } catch (error) {
+    console.error("Error comprobando el límite de uso en /api/cierre:", error);
+    return NextResponse.json({ error: "No se pudo procesar. Inténtalo de nuevo." }, { status: 502 });
+  }
 
   let encuesta;
   try {
