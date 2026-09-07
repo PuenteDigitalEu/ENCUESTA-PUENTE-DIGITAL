@@ -1,7 +1,7 @@
 # Estrategia de pruebas
 
-**Estado del documento:** Borrador para validar (v1)
-**Última actualización:** 2026-09-06
+**Estado del documento:** Vigente (v1)
+**Última actualización:** 2026-09-07
 **Acompaña a:** `docs/features/README.md` (tablas de cobertura) · `docs/prd.md` (requisitos)
 
 ---
@@ -136,11 +136,8 @@ hay que fijar cuanto antes.
 
 ## 6. Qué corre en CI
 
-Hoy (heredado del clon) CI solo ejecuta `verificar-cobertura.mjs`. Para un "producto con negocio
-detrás" eso se queda corto.
-
-**Propuesta para la v1** (decisión abierta, §8): un workflow que en cada `pull_request` ejecute,
-además de la cobertura:
+El clon solo traía `verificar-cobertura.mjs`. En la Fase 0 del roadmap (0.8) se añade un segundo
+workflow que en cada `pull_request` ejecuta, además de la cobertura:
 
 - `pnpm install --frozen-lockfile`
 - `pnpm lint`
@@ -164,8 +161,8 @@ La tercera columna definitiva la fija la ficha de cada feature. Esta tabla es el
 | `M-05` | Tests unitarios de `src/lib/rubrica/`: determinismo, umbrales, versión. Revisión de que el prompt del diagnóstico **recibe** los valores, no los pide. |
 | `M-06` | Test de ruta: la 2ª llamada a Claude lleva el objeto de rúbrica y un system prompt propio. "Cita el mismo nivel" → muestreo manual. |
 | `M-07` | Test unitario de la rúbrica (`completo=false`, `datos_faltantes`) + test de render del diagnóstico (muestra la sección de lo que falta). |
-| `M-08` | Test de integración del cierre: sin los 4 campos válidos no hay diagnóstico; con ellos, se persisten. |
-| `M-09` | `persistencia.test.ts` (mocks) + `verificar-persistencia.mjs` (esquema real): recuperar por token contacto, respuestas, resultado y diagnóstico. |
+| `M-08` | Test de integración del cierre: sin los 4 campos válidos no hay diagnóstico; con ellos, se persisten y la encuesta pasa de `respondida` a `completada`. |
+| `M-09` | `persistencia.test.ts` (mocks) + `verificar-persistencia.mjs` (esquema real): al terminar la entrevista se persiste `respuestas` + `estado = 'respondida'`; al cerrar, se recuperan por token contacto, resultado y diagnóstico. |
 | `M-10` | Tests de ruta `/api/chat`: un email por cierre, registro `enviado`/`fallido`, no bloquea al visitante. + `aviso-consultor.test.ts`. |
 | `M-11` | Test de integración del layout de `(panel)/`: sin sesión → redirige; con sesión sin fila en `consultores` → no expone; con ambas → lista y detalle. |
 | `M-12` | `ip.test.ts` (HMAC no reversible, falla sin pepper) + tests de ruta (429) + `verificar-persistencia.mjs` (no hay IP en claro en ninguna tabla). |
@@ -179,8 +176,6 @@ La tercera columna definitiva la fija la ficha de cada feature. Esta tabla es el
 
 ## 8. Decisiones abiertas
 
-- **Ampliar CI** para que corra `pnpm test`, `pnpm lint` y `pnpm build`, no solo la cobertura
-  (§6). Recomendado; pendiente de tu visto bueno para crear/editar el workflow.
 - **Umbral de cobertura de código.** Propuesta: sin porcentaje global obligatorio, pero
   `src/lib/rubrica/` cerca del 100 % de ramas. Se afina cuando la rúbrica exista.
 - **E2E.** Fuera de la v1; se reevalúa si el flujo del visitante se vuelve difícil de comprobar a

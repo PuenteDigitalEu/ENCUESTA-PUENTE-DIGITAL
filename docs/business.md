@@ -1,6 +1,6 @@
 # Negocio
 
-**Estado del documento:** Borrador para validar (v1)
+**Estado del documento:** Vigente (v1)
 **Última actualización:** 2026-09-07
 **Acompaña a:** `docs/prd.md` (§9 métricas) · `docs/roadmap.md` (Fase 2, instrumentación)
 
@@ -90,11 +90,12 @@ Amplía `docs/prd.md` §9 con la definición y cómo se mide cada una.
 | Métrica | Definición | Cómo se mide |
 |---------|------------|-------------|
 | Encuestas iniciadas | Filas en `encuestas` | SQL |
+| Encuestas respondidas | `estado in ('respondida','completada')` — terminaron la entrevista | SQL |
 | Encuestas completadas | `encuestas.estado = 'completada'` | SQL |
 | **Tasa de completado** | completadas ÷ iniciadas | SQL |
-| Abandono por etapa | iniciadas sin ningún turno · con turnos sin completar · abandono en el formulario de contacto | SQL (la etapa "formulario" solo si se decide persistir respuestas sin contacto — `user-flows.md` FLOW-01) |
+| Abandono por etapa | `en_curso` sin turnos · `en_curso` con turnos · `respondida` (terminó la entrevista, no dejó contacto) · `completada` | SQL directo sobre `encuestas.estado` (las `respuestas` se persisten al terminar la entrevista) |
 | **Leads cualificados** | completadas con `nivel_preparacion` medio/alto **y** `presupuesto_rango` por encima de un umbral | SQL sobre `resultados_rubrica` + `respuestas` (definición provisional hasta tener rúbrica) |
-| Coste de IA por encuesta completada | gasto de API del periodo ÷ completadas | Requiere **registrar el coste/tokens por encuesta** — hoy el esquema no lo guarda (§7) |
+| Coste de IA por encuesta | `respuestas.coste_ia` agregado ÷ nº de encuestas | SQL — `coste_ia` (`usage` de las dos llamadas) se guarda desde la v1 |
 | Conversión lead → 1ª reunión → propuesta → cliente | embudo comercial posterior al lead | **Manual** (agenda / notas / CRM del consultor) |
 | CAC parcial | (coste IA + prorrateo del fijo) ÷ clientes conseguidos | Manual + SQL |
 | Tiempo de cualificación ahorrado | estimación de minutos por lead que ya no requieren primera llamada de criba | Cualitativa |
@@ -126,26 +127,27 @@ reales** y a partir de ahí se ponen objetivos. Rangos ilustrativos para orienta
 | **RGPD.** Se tratan datos de contacto y datos de negocio de terceros; el responsable del tratamiento es el consultor. | Minimización (solo 4 campos + respuestas), consentimiento con versión, retención 24 meses con purga automática, sin cesión a terceros. |
 | **Mantenimiento de código propio** frente a una herramienta de terceros. | Stack pequeño y heredado ya probado; el coste se asume como parte de la apuesta de §2. |
 
-## 7. Instrumentación pendiente (roadmap Fase 2)
+## 7. Instrumentación
 
-Para poder medir lo de §4, falta:
+**En la v1:**
 
-- **Registrar coste/tokens de IA por encuesta.** Guardar `usage` de las dos llamadas a Claude
-  (entrada, salida, caché) en una columna de `resultados_rubrica` o en una tabla `costes_ia`. Hoy
-  no se guarda nada.
-- **Consultas SQL guardadas** para el embudo hasta "lead" (iniciadas, completadas, tasa, abandono
-  por etapa, leads cualificados), en el panel o como export.
-- **Marcar la etapa de abandono** (depende de la decisión de persistir respuestas sin contacto).
+- **`respuestas.coste_ia`** guarda el `usage` de las dos llamadas a Claude por encuesta (§4). Es
+  el dato base de la métrica de coste.
+- El **abandono por etapa** sale directo de `encuestas.estado` (`en_curso` / `respondida` /
+  `completada`), porque las respuestas se persisten al terminar la entrevista.
+
+**Pendiente para Fase 2:**
+
+- **Consultas SQL guardadas** para el embudo hasta "lead" (iniciadas, respondidas, completadas,
+  tasa, abandono por etapa, leads cualificados, coste medio), en el panel o como export.
 - **Un sitio para el embudo post-lead** (reunión → propuesta → cliente): CRM ligero o una hoja de
   cálculo; no hace falta que viva en la app.
 
 ## 8. Decisiones abiertas
 
 - **Definición exacta de "lead cualificado"** — umbral de `nivel_preparacion` y de
-  `presupuesto_rango`. Depende de que exista la rúbrica.
+  `presupuesto_rango`. Depende de que exista la rúbrica (Fase 0.4).
 - **Objetivos numéricos** — se fijan tras la línea base de las primeras ~20 encuestas.
-- **¿Se registra el coste de IA por encuesta desde la v1?** Recomendado: sí, aunque sea una columna
-  simple — sin ese dato, la métrica de coste es una estimación a mano.
 - **¿Activar caché de prompt en la entrevista dentro de la v1** o dejarlo para `mejoras/`? Baja el
   coste variable a la mitad; el cambio es pequeño.
 - **Plan de Vercel** — Pro por uso comercial, a confirmar.

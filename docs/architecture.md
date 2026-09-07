@@ -1,7 +1,7 @@
 # Arquitectura
 
-**Estado del documento:** Borrador para validar (v1)
-**Última actualización:** 2026-09-06
+**Estado del documento:** Vigente (v1)
+**Última actualización:** 2026-09-07
 **Acompaña a:** `docs/prd.md` (qué se construye) · `docs/data-model.md` (tablas) ·
 `docs/user-flows.md` (recorridos con estado)
 
@@ -135,12 +135,15 @@ El detalle con estados y casos de error va en `docs/user-flows.md`. Resumen:
    con el system prompt de entrevista (guion + instrucciones) y devuelve **una sola pregunta**.
    Incrementa `turnos_totales`. Tope duro de seguridad: `MAX_MENSAJES` (muy por encima del largo
    previsto del guion).
-4. **Cierre.** Cuando Claude ha cubierto los ocho bloques del guion, emite en su respuesta un
-   bloque estructurado de respuestas (la "ficha"). `/api/chat` lo detecta (`contieneFicha`), lo
-   parsea a campos tipados con etiqueta `confirmado | estimado | pendiente` por campo
-   (`parsearRespuestas`), y **no** se lo muestra en crudo al visitante.
+4. **Fin de entrevista.** Cuando Claude ha cubierto los ocho bloques del guion, emite en su
+   respuesta un bloque estructurado de respuestas (la "ficha"). `/api/chat` lo detecta
+   (`contieneFicha`), lo parsea a campos tipados con etiqueta `confirmado | estimado | pendiente`
+   por campo (`parsearRespuestas`), **persiste `respuestas`** (contenido + columnas promovidas +
+   `coste_ia.entrevista`), marca `encuestas.estado = 'respondida'`, y **no** muestra la ficha en
+   crudo al visitante.
 5. **Contacto obligatorio.** Antes de mostrar nada, el chat pide nombre, email, teléfono y empresa.
-   Sin los cuatro válidos, no hay diagnóstico (`M-08`).
+   Sin los cuatro válidos, no hay diagnóstico (`M-08`). Si el visitante abandona aquí, la encuesta
+   se queda en `respondida` con sus respuestas ya guardadas.
 6. **Rúbrica.** `src/lib/rubrica/` toma las respuestas parseadas y calcula, de forma determinista:
    el **nivel de preparación para IA** y el **ranking de casos de uso** por impacto × viabilidad.
    Si faltan respuestas que la rúbrica necesita, marca el resultado como incompleto y **no imputa
@@ -149,8 +152,9 @@ El detalle con estados y casos de error va en `docs/user-flows.md`. Resumen:
    datos de entrada y redacta el texto narrativo, citando el mismo nivel y los mismos casos de uso.
    No recalcula nada (`M-06`). Se le añade la nota fija de "orientación preliminar, no vinculante"
    (`M-13`).
-8. **Persistencia.** `persistirCierre` escribe, encadenado por el token: contacto → respuestas →
-   resultado de rúbrica → diagnóstico, y marca la conversación como `completada`.
+8. **Persistencia del cierre.** `persistirCierre` escribe, encadenado por el token: contacto →
+   resultado de rúbrica → diagnóstico, completa `respuestas.coste_ia.diagnostico`, y marca la
+   encuesta como `completada` (las `respuestas` ya se guardaron en el paso 4).
 9. **Aviso.** `/api/chat` dispara el email al consultor (Resend) con el resumen del lead. Un fallo
    de envío se registra como `fallido` y **no** bloquea la respuesta al visitante (`M-10`, `RNF-07`).
 10. **Panel.** El consultor entra con login y ve la encuesta en su listado.
@@ -195,10 +199,16 @@ en el despliegue (§9).
 - **Capa única de mapeo.** `src/lib/supabase/persistencia.ts` concentra todo el SQL y el mapeo
   camelCase ↔ snake_case. `app/api/` no lleva SQL disperso. `scripts/verificar-persistencia.mjs`
   ejercita esas mismas funciones contra un Postgres real (PGlite).
-- **Sin transacción SQL** (decisión heredada, riesgo asumido para el MVP). Las escrituras del
-  cierre van como inserts secuenciales; si una falla a mitad, puede quedar una fila huérfana. Se
-  detecta por `console.error` en la ruta, no hay compensación automática. **A revisar** cuando haya
-  volumen real (candidato a `mejoras/`).
+- **Persistencia en dos momentos.** Al terminar la entrevista se guarda `respuestas` y la encuesta
+  pasa a `respondida` (así el consultor ve también las encuestas terminadas sin contacto). Al
+  rellenar el formulario de contacto se guarda el resto (`contactos`, `resultados_rubrica`,
+  `diagnosticos`) y pasa a `completada`. Detalle en `docs/data-model.md` §7–§8.
+- **Coste de IA.** El `usage` de las dos llamadas a Claude (entrevista + diagnóstico) se guarda en
+  `respuestas.coste_ia` para la métrica de coste por encuesta (`docs/business.md` §4).
+- **Sin transacción SQL** (decisión heredada, riesgo asumido para el MVP). Las escrituras van como
+  inserts secuenciales; si una falla a mitad, puede quedar una fila huérfana o un estado que no
+  cuadra con sus filas. Se detecta por `console.error` en la ruta, no hay compensación automática.
+  **A revisar** cuando haya volumen real (candidato a `mejoras/`).
 - **Retención a 24 meses (`M-14`).** Un job de `pg_cron` en Supabase borra periódicamente las
   `conversaciones` con `iniciada_en` de más de 24 meses y, en cascada, sus filas dependientes. El
   plazo se nombra en el texto de consentimiento. Alternativa considerada y descartada para la v1:
@@ -259,8 +269,9 @@ Ninguna clave real se escribe en `.mcp.json` (se commitea): va `${VARIABLE}` y e
 - **Supabase**: proyecto nuevo, propio de este repo. `supabase link` rellena `project_id` en
   `supabase/config.toml`. Migraciones en `supabase/migrations/`. **Nunca** apuntar nada de este
   repo al proyecto de la asesoría.
-- CI: `.github/workflows/cobertura.yml` corre `verificar-cobertura.mjs` en cada PR. Falla hasta que
-  `docs/prd.md` y las fichas de `docs/features/` existan (ya existe el PRD; faltan fichas).
+- CI: `.github/workflows/cobertura.yml` corre `verificar-cobertura.mjs` en cada PR. En la Fase 0
+  del roadmap se añade un segundo workflow con `pnpm lint` + `pnpm test` + `pnpm build` (todo
+  mockeado, sin credenciales) — ver `docs/testing.md` §6.
 
 ## 12. MCPs del proyecto
 

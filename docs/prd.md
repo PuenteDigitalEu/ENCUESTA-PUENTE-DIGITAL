@@ -1,7 +1,7 @@
 # PRD — Encuesta conversacional de preparación para IA
 
-**Estado del documento:** Borrador para validar (v1)
-**Última actualización:** 2026-09-06
+**Estado del documento:** Vigente (v1)
+**Última actualización:** 2026-09-07
 **Clasificación (CLAUDE.md):** Producto con negocio detrás
 
 ---
@@ -121,16 +121,19 @@ lleva su criterio de aceptación tras el guion largo.
   nombre de contacto, email, teléfono y empresa; el diagnóstico no se muestra hasta que los cuatro
   campos están rellenos y el email tiene formato válido; con ellos, se persisten junto a la
   conversación y se muestra el diagnóstico.
-- **[M-09] Persistencia encadenada por token de sesión** — Conversación, respuestas estructuradas,
-  datos de contacto y texto del diagnóstico se guardan en Supabase enlazados por un token de
-  sesión; dado ese token se pueden recuperar los cuatro.
+- **[M-09] Persistencia encadenada por token de sesión** — Las respuestas estructuradas se guardan
+  al terminar la entrevista (la encuesta queda en estado `respondida`); los datos de contacto, el
+  resultado de la rúbrica y el texto del diagnóstico se guardan al rellenar el formulario de
+  contacto (estado `completada`). Todo enlazado por un token de sesión; dado ese token se pueden
+  recuperar.
 - **[M-10] Aviso por email al consultor** — Completar una encuesta genera exactamente un email a la
   dirección configurada, con los datos de contacto, la empresa, el nivel de preparación y los casos
   de uso priorizados.
 - **[M-11] Panel del consultor con Supabase Auth** — Ruta protegida por login (Supabase Auth,
   cuentas dadas de alta manualmente); sin sesión válida redirige al login y no expone datos; con
-  sesión válida muestra el listado de encuestas completadas ordenado por fecha y el detalle de cada
-  una (respuestas, contacto, diagnóstico).
+  sesión válida muestra el listado de encuestas `completada` y `respondida` (estas marcadas "sin
+  contacto") ordenado por fecha, y el detalle de cada una (respuestas; contacto y diagnóstico si
+  los hay).
 - **[M-12] Límite de uso por IP** — Superado el número de encuestas iniciadas por IP en la ventana
   de tiempo configurada, un nuevo intento desde esa IP recibe un rechazo controlado; en la base de
   datos la IP solo aparece como hash (HMAC-SHA256 con pepper), nunca en claro.

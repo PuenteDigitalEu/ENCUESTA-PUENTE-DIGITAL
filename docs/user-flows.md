@@ -1,6 +1,6 @@
 # Flujos con estado
 
-**Estado del documento:** Borrador para validar (v1)
+**Estado del documento:** Vigente (v1)
 **Última actualización:** 2026-09-07
 **Acompaña a:** `docs/prd.md` · `docs/architecture.md` (§5 resumen del runtime) · `docs/data-model.md`
 
@@ -61,6 +61,7 @@ sequenceDiagram
         ACH-->>UI: { message }
     end
     CL-->>ACH: respuesta con la ficha de cierre
+    ACH->>DB: persistir respuestas (parseadas) + encuesta.estado = respondida
     ACH->>UI: señal de cierre (sin enseñar la ficha en crudo)
     UI->>V: FormularioContacto (nombre, email, teléfono, empresa)
     V->>UI: 4 campos válidos
@@ -68,7 +69,7 @@ sequenceDiagram
     ACH->>RB: calcular(nivel_preparacion, casos_uso, completo, datos_faltantes)
     ACH->>CL: 2º prompt — redactar diagnóstico con el resultado YA calculado
     CL-->>ACH: markdown del diagnóstico
-    ACH->>DB: persistirCierre: contacto → respuestas → resultado_rubrica → diagnostico; encuesta.estado = completada
+    ACH->>DB: persistirCierre: contacto → resultado_rubrica → diagnostico; encuesta.estado = completada
     ACH-->>UI: { diagnóstico }
     UI->>V: Diagnóstico + nivel + ranking + DatosFaltantes (si aplica) + nota de alcance
     Note over ACH: dispara FLOW-02 (no bloquea esta respuesta)
@@ -80,7 +81,8 @@ sequenceDiagram
 |---------|------------|
 | Acepta consentimiento | Fila nueva en `encuestas` (`estado = 'en_curso'`, `consentimiento_en`, `consentimiento_version`, `token`). Nada de datos personales todavía. |
 | Cada turno de entrevista | `encuestas.turnos_totales += 1`. Fila nueva en `limites_uso` (`accion = 'enviar_mensaje'`). El historial vive en el cliente, no en el servidor. |
-| Envía el formulario de contacto (4 campos válidos) | Se ejecuta la rúbrica y el 2º prompt, y **entonces** `persistirCierre` escribe, encadenado por el token: `contactos` → `respuestas` → `resultados_rubrica` → `diagnosticos`, y `encuestas.estado = 'completada'` + `finalizada_en`. |
+| Claude emite la ficha de cierre | Se persiste `respuestas` (contenido parseado + columnas promovidas + `coste_ia.entrevista`) y `encuestas.estado = 'respondida'`. Todavía sin contacto ni diagnóstico. |
+| Envía el formulario de contacto (4 campos válidos) | Se ejecuta la rúbrica y el 2º prompt, y **entonces** `persistirCierre` escribe, encadenado por el token: `contactos` → `resultados_rubrica` → `diagnosticos`, se completa `respuestas.coste_ia.diagnostico`, y `encuestas.estado = 'completada'` + `finalizada_en`. |
 | Respuesta al visitante | Se muestra el diagnóstico. Se dispara `FLOW-02`. |
 
 ### Casos de error
@@ -91,21 +93,18 @@ sequenceDiagram
 | Límite por IP superado al crear la encuesta | 429, mensaje genérico ("no se pueden iniciar más… inténtalo más tarde"), sin decir el umbral | Nada nuevo. |
 | Límite por IP superado a mitad de entrevista | 429 en ese turno, mensaje genérico | La encuesta sigue `en_curso`; puede reintentar cuando expire la ventana. |
 | `token` inválido, expirado o de encuesta ya cerrada | 401, **mensaje genérico único** — no distingue el motivo | Sin cambios. |
-| Falla la llamada a Claude (entrevista o redacción) | 502, "no se pudo procesar… inténtalo de nuevo" — nunca un 500 mudo ni detalle técnico | Sin cambios. Si falla la redacción del diagnóstico, **no** se ha llamado a `persistirCierre`. |
-| Falla `persistirCierre` a mitad | 502; **el diagnóstico no se muestra** aunque ya estuviera redactado (un diagnóstico que no se guardó no se puede auditar) | Posible fila huérfana (sin transacción SQL, riesgo asumido — `architecture.md` §8). Se detecta por `console.error`. |
-| Abandona en el formulario de contacto | — | La encuesta queda `en_curso`. **Las respuestas de la entrevista no se persisten** (solo existían parseadas en memoria). Ver decisión abierta. |
-| Recarga la página a mitad | Pierde el hilo (comportamiento v1) | La encuesta queda `en_curso` hasta expirar. Ver `FLOW-04`. |
+| Falla al persistir `respuestas` (fin de entrevista) | 502; no se avanza al formulario de contacto. El visitante puede reintentar ese turno. | La encuesta sigue `en_curso`. |
+| Falla la llamada a Claude (entrevista o redacción) | 502, "no se pudo procesar… inténtalo de nuevo" — nunca un 500 mudo ni detalle técnico | Si falla la redacción del diagnóstico, la encuesta ya está en `respondida` con sus `respuestas` guardadas; **no** se ha llamado a `persistirCierre`. |
+| Falla `persistirCierre` a mitad | 502; **el diagnóstico no se muestra** aunque ya estuviera redactado (un diagnóstico que no se guardó no se puede auditar) | La encuesta queda en `respondida` (con `respuestas`); posible fila huérfana en `contactos`/`resultados_rubrica` (sin transacción SQL, riesgo asumido — `data-model.md` §8). Se detecta por `console.error`. |
+| Abandona en el formulario de contacto | — | La encuesta queda en **`respondida`**: sus respuestas **sí** están persistidas (`M-09`), sin contacto ni diagnóstico. El consultor la ve en el panel marcada como sin contacto. |
+| Recarga la página a mitad de la entrevista | Pierde el hilo (comportamiento v1) | La encuesta queda `en_curso` hasta expirar. Ver `FLOW-04`. |
 
 ### Decisiones abiertas
 
-- **Persistir las respuestas aunque no haya contacto.** Hoy, si el visitante abandona en el
-  formulario, se pierde todo lo que respondió. Alternativa: guardar `respuestas` al detectar la
-  ficha de cierre (antes del contacto), aceptando tener filas sin `contacto_id` ni resultado. A
-  favor de guardar: el consultor ve "casi-leads". En contra: guarda datos de negocio de alguien
-  que no dejó contacto ni pidió el diagnóstico. **Sin resolver.**
 - **Reintento del formulario de contacto.** Si el email no valida en servidor, ¿se re-muestra el
-  formulario con el error sin perder las respuestas parseadas? (Sí, pero hay que mantener ese
-  estado en el cliente hasta el cierre.)
+  formulario con el error sin perder el hilo? (Sí; las `respuestas` ya están persistidas, así que
+  basta con reintentar la llamada de cierre — no hay estado que rehidratar salvo el propio
+  formulario.)
 
 ---
 
@@ -160,16 +159,16 @@ sequenceDiagram
         AUTH-->>C: sesión
         C->>P: vuelve a /encuestas
     end
-    P->>DB: SELECT encuestas completadas (policy: es_consultor())
+    P->>DB: SELECT encuestas en estado completada o respondida (policy: es_consultor())
     alt Sesión pero sin fila en consultores
         DB-->>P: 0 filas (RLS no deja ver nada)
         P-->>C: Listado vacío / aviso de acceso no autorizado
     else Consultor válido
         DB-->>P: filas
-        P-->>C: Listado por fecha desc (empresa, contacto, nivel, nº casos)
+        P-->>C: Listado por fecha desc (empresa/—, contacto/—, nivel/—, nº casos/—; las respondida marcadas "sin contacto")
         C->>P: Clic en una fila
-        P->>DB: SELECT respuestas + resultado_rubrica + diagnostico de esa encuesta
-        P-->>C: Detalle: contacto · respuestas por los 8 bloques (S-02) · diagnóstico como lo vio el visitante
+        P->>DB: SELECT respuestas (+ resultado_rubrica + diagnostico si es completada)
+        P-->>C: Detalle: contacto (si hay) · respuestas por los 8 bloques (S-02) · diagnóstico (si es completada)
     end
 ```
 
@@ -179,7 +178,7 @@ sequenceDiagram
 |-----------|-----------|
 | Sin sesión, cualquier ruta de `(panel)/` | Redirige a `/login`. No se renderiza nada del panel. |
 | Sesión válida pero sin fila en `consultores` | RLS devuelve 0 filas en toda tabla. El panel no expone datos; muestra un estado neutro. |
-| Enlace directo a `/encuestas/:id` de una encuesta que no existe o no está completada | 404 / "no encontrada". |
+| Enlace directo a `/encuestas/:id` de una encuesta que no existe o sigue `en_curso`/`abandonada` | 404 / "no encontrada". Las `respondida` sí se muestran (sin la parte de diagnóstico). |
 | Sesión expirada a mitad de uso | La siguiente navegación redirige a `/login`. |
 
 ### Nota
@@ -202,8 +201,10 @@ heredada). Recargar la página, cerrar la pestaña o volver más tarde **pierde 
 forma de retomar. La encuesta queda `en_curso` en Supabase hasta que `expira_en` la marca vencida
 (30 días) y `FLOW-05` la limpia.
 
-Es una pérdida aceptada para el MVP: el visitante empieza de cero, y como no se persistió nada de
-sus respuestas (ver `FLOW-01`), no hay dato huérfano suyo salvo la fila de `encuestas` vacía.
+Es una pérdida aceptada para el MVP: el visitante empieza de cero. Si abandona **antes** de
+terminar la entrevista no se persistió nada de sus respuestas (solo la fila de `encuestas`); si la
+terminó y abandonó en el formulario de contacto, la encuesta está en `respondida` con sus
+respuestas guardadas (ver `FLOW-01`), pero aun así no hay forma de retomarla en esta versión.
 
 ### Objetivo de `S-01`
 
@@ -227,11 +228,12 @@ hace (el historial solo vive en el cliente). Detalle en la ficha de `S-01`.
 
 ### Pasos (job de `pg_cron` en Supabase)
 
-1. Selecciona las `encuestas` con `iniciada_en < now() - interval '24 months'`.
+1. Selecciona las `encuestas` con `iniciada_en < now() - interval '24 months'` (cualquier `estado`).
 2. Las borra. Por `on delete cascade` caen: `respuestas` → `resultados_rubrica` → `diagnosticos`,
    y `notificaciones_consultor` de esa encuesta.
-3. En la misma pasada, marca `abandonada` (o borra) las `encuestas` con `estado = 'en_curso'` y
-   `expira_en < now()` — encuestas que nadie completó ni va a completar.
+3. En la misma pasada, marca `abandonada` (o borra) las `encuestas` con `estado in ('en_curso',
+   'respondida')` y `expira_en < now()` — encuestas que nadie va a completar (una `respondida`
+   vencida es una entrevista terminada cuyo visitante no dejó contacto).
 4. Purga los `contactos` que ya no están referenciados por ninguna `encuesta` (consulta aparte,
    documentada junto al job: `contactos` no cae en cascada porque una persona puede tener varias
    encuestas).

@@ -1,6 +1,6 @@
 # Sistema de diseño
 
-**Estado del documento:** Borrador para validar (v1)
+**Estado del documento:** Vigente (v1)
 **Última actualización:** 2026-09-07
 **Fuente de verdad de los tokens:** este documento. `src/app/globals.css` es su espejo — se cambia
 aquí primero y luego allí, nunca al revés ni en los componentes sueltos.
@@ -51,7 +51,8 @@ revisan al cerrar identidad.
 |-------|-----|-----|
 | `--color-primary` | `#3457d5` | Azul. Acciones principales del chat (botón Enviar), acentos de estructura, borde de la burbuja del agente, foco de inputs. Blanco encima cumple AA. |
 | `--color-secondary` | `#2f9e6e` | Verde. Etiquetas de refuerzo, confirmaciones suaves. |
-| `--color-accent` | `#ff6b4a` | Coral. CTA de entrada ("Empezar", "Acepto y empiezo"). **Ver aviso de contraste abajo.** |
+| `--color-accent` | `#c9402a` | Coral oscurecido. CTA de entrada ("Empezar", "Acepto y empiezo"). Texto blanco encima: ~4.9:1, cumple AA. |
+| `--color-accent-hover` | `#a8351f` | Estado hover del CTA. Se **oscurece** el acento, no se aclara con opacidad (aclararlo rompía el AA). |
 | `--color-background` | `#ffffff` | Fondo base. |
 | `--color-surface` | `#f4f6fb` | Fondo de secciones alternas, cards, burbuja del agente, bordes suaves. |
 | `--color-text-primary` | `#1a1f36` | Texto principal. |
@@ -60,11 +61,11 @@ revisan al cerrar identidad.
 | `--color-error` | `#e5484d` | Errores de formulario y de turno. |
 | `--color-warning` | `#f5a623` | Avisos (fondo `warning/10`, borde `warning/40`). |
 
-> **Aviso de contraste (`RNF-05`).** `--color-accent` `#ff6b4a` con texto blanco **no cumple
-> WCAG AA** para texto normal (queda por debajo de 4.5:1). Afecta al CTA principal. Opciones:
-> (a) oscurecer el acento hasta pasar AA, (b) usarlo solo con texto de tamaño "grande"
-> (≥ 24 px, o ≥ 18.66 px en negrita), (c) elegir otro acento al definir la marca. **Decisión
-> abierta (§13).** Hasta resolverlo, tratar el CTA coral como provisional.
+> **Contraste del CTA (`RNF-05`) — resuelto.** El `#ff6b4a` heredado daba ~2.8:1 con texto
+> blanco (no cumplía AA). Se oscureció a `#c9402a` (~4.9:1). El hover **no** puede aclarar el
+> botón (`hover:bg-accent/90` bajaba el contraste): usa `--color-accent-hover` (`#a8351f`,
+> ~6.6:1). El tono definitivo del coral puede reajustarse al fijar la identidad de marca,
+> manteniendo el mínimo AA.
 
 No se usan colores fuera de estos tokens. Un tono nuevo se añade aquí antes de usarse.
 
@@ -115,7 +116,7 @@ dependencia de runtime) — decisión menor, se toma en la feature del panel.
 
 | Componente | Ajuste para la v1 |
 |------------|-------------------|
-| `CtaButton` (`primary` = fondo acento, `outline` = borde primario) | Copy. Revisar el fondo acento tras resolver el contraste (§4). |
+| `CtaButton` (`primary` = fondo acento, `outline` = borde primario) | Copy. Cambiar el hover de `hover:bg-accent/90` a `hover:bg-accent-hover` (§4). |
 | `ChatBubble` (agente: `surface` + borde izq. `primary`; visitante: `primary` + texto blanco) | Sin cambios de estilo. |
 | `MarkdownLite` (encabezados 1–3, negrita, listas, párrafos) | Sin cambios: el diagnóstico llega en markdown, igual que el plan heredado. |
 | `ConsentScreen` | Reescribir el texto: qué se pregunta (negocio, no finanzas personales), retención **24 meses** (`M-14`), quién recibe los datos (el consultor). |
@@ -199,8 +200,6 @@ dependencia de runtime) — decisión menor, se toma en la feature del panel.
 
 ## 13. Decisiones abiertas
 
-- **Contraste del acento coral** (§4). Bloquea dar por buenos los CTA. Recomendación: oscurecerlo a
-  un valor que pase AA con blanco y actualizar el token; el resto del sistema no cambia.
 - **Valores y colores de `nivel_preparacion`** — dependen de la rúbrica (paso siguiente).
 - **Representación de impacto/viabilidad** en el ranking (puntos vs. barra vs. número) — se cierra
   al maquetar esa card, con datos reales de la rúbrica delante.

@@ -1,7 +1,7 @@
 # Modelo de datos
 
-**Estado del documento:** Borrador para validar (v1)
-**Última actualización:** 2026-09-06
+**Estado del documento:** Vigente (v1)
+**Última actualización:** 2026-09-07
 **Traducción ejecutable:** `supabase/migrations/` (se reescribe la `001`; ver §9)
 **Acompaña a:** `docs/architecture.md` · `docs/prd.md`
 
@@ -24,7 +24,7 @@ negocio y un resultado de rúbrica de preparación para IA.
 erDiagram
   consultores ||--o{ notificaciones_consultor : "recibe"
   contactos   ||--o{ encuestas : "identifica"
-  encuestas   ||--o| respuestas : "tiene (al cerrar)"
+  encuestas   ||--o| respuestas : "tiene (al terminar la entrevista)"
   encuestas   ||--o{ notificaciones_consultor : "genera"
   respuestas  ||--o| resultados_rubrica : "produce"
   resultados_rubrica ||--o| diagnosticos : "se redacta como"
@@ -44,14 +44,14 @@ erDiagram
   }
   encuestas {
     uuid id PK
-    uuid contacto_id FK "null hasta el cierre"
+    uuid contacto_id FK "null hasta el formulario de contacto"
     uuid token UK "secreto de sesión"
     timestamptz consentimiento_en
     text consentimiento_version
     timestamptz expira_en
     timestamptz iniciada_en
     timestamptz finalizada_en
-    text estado "en_curso | completada | abandonada"
+    text estado "en_curso | respondida | completada | abandonada"
     int turnos_totales
   }
   respuestas {
@@ -63,6 +63,7 @@ erDiagram
     text madurez_digital
     text presupuesto_rango
     text decision_quien
+    jsonb coste_ia "usage de las llamadas a Claude"
     timestamptz creado_en
   }
   resultados_rubrica {
@@ -108,8 +109,10 @@ dominio.
 - **`dato_estado`** — `confirmado | estimado | pendiente`. Heredado. Calidad de cada respuesta de
   la encuesta. `pendiente` significa que el visitante no dio el dato: nunca se rellena con una
   suposición (`M-07`). Vive dentro de `respuestas.contenido`, no como columna suelta (§4).
-- **`encuesta_estado`** — `en_curso | completada | abandonada`. (En el clon era un `check`, no un
-  enum; se mantiene como `check` para poder añadir estados sin migración de tipo.)
+- **`encuesta_estado`** — `en_curso | respondida | completada | abandonada`. (Un `check`, no un
+  enum, para poder añadir estados sin migración de tipo.) `respondida` = el visitante terminó los
+  ocho bloques y ya hay fila en `respuestas`, pero no dejó contacto ni hay diagnóstico. `completada`
+  = todo el cierre hecho (contacto + resultado + diagnóstico).
 - **`nivel_preparacion`** — **provisional**, se fija al diseñar la rúbrica: `sin_preparar |
   inicial | en_desarrollo | consolidada`. Salida principal de la rúbrica.
 - **`limite_accion`** — `crear_encuesta | enviar_mensaje`. (Renombrado desde
@@ -138,9 +141,9 @@ Alta manual (un `insert`). No hay pantalla de registro. En la v1 habrá una sola
 
 ### `contactos`
 
-Datos de contacto del lead. Se crea **solo al cerrar la encuesta**, cuando el visitante da los
-cuatro campos (`M-08`) — nunca antes (minimización RGPD). Email normalizado a minúsculas antes de
-insertar, para enlazar a la misma persona si repite la encuesta en vez de duplicarla.
+Datos de contacto del lead. Se crea **solo cuando el visitante rellena el formulario de contacto**
+con los cuatro campos (`M-08`) — nunca antes (minimización RGPD). Email normalizado a minúsculas
+antes de insertar, para enlazar a la misma persona si repite la encuesta en vez de duplicarla.
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -152,7 +155,7 @@ insertar, para enlazar a la misma persona si repite la encuesta en vez de duplic
 | `creado_en` | `timestamptz not null default now()` | |
 
 > Cambio respecto al clon: `clientes` tenía `nombre` opcional y solo `email`. Aquí los cuatro son
-> `not null` porque el cierre no ocurre sin ellos.
+> `not null` porque el diagnóstico no se muestra sin ellos.
 
 ### `encuestas`
 
@@ -162,29 +165,31 @@ Una fila por visitante que acepta el consentimiento y abre el chat, complete la 
 | Columna | Tipo | Notas |
 |---------|------|-------|
 | `id` | `uuid` PK `default gen_random_uuid()` | |
-| `contacto_id` | `uuid references contactos(id)` | `null` hasta el cierre. Tras `estado = 'completada'` **siempre** tiene valor (invariante de `M-08`). |
+| `contacto_id` | `uuid references contactos(id)` | `null` hasta que el visitante rellena el formulario de contacto. Tras `estado = 'completada'` **siempre** tiene valor (invariante de `M-08`); en `estado = 'respondida'` es `null`. |
 | `token` | `uuid not null unique default gen_random_uuid()` | Secreto de sesión efímero. Único que autoriza a `/api/chat` a escribir en esta encuesta. No es una URL por destinatario. |
 | `consentimiento_en` | `timestamptz not null` | Hora de servidor al aceptar. `M-02`. |
 | `consentimiento_version` | `text not null` | Identificador de la versión del texto de consentimiento aceptada (p. ej. `2026-09-01`). Nuevo respecto al clon: permite auditar qué aceptó cada visitante si el texto cambia. |
 | `expira_en` | `timestamptz not null default (now() + interval '30 days')` | Ventana para reanudar una encuesta a medias (`S-01`). Reloj corto, distinto de la retención (§6). |
 | `iniciada_en` | `timestamptz not null default now()` | Ancla de la retención a 24 meses. |
-| `finalizada_en` | `timestamptz` | Se rellena al completar. |
-| `estado` | `text not null default 'en_curso' check (estado in ('en_curso','completada','abandonada'))` | |
+| `finalizada_en` | `timestamptz` | Se rellena al completar (`estado = 'completada'`). |
+| `estado` | `text not null default 'en_curso' check (estado in ('en_curso','respondida','completada','abandonada'))` | `respondida`: entrevista terminada y `respuestas` persistida, sin contacto ni diagnóstico. |
 | `turnos_totales` | `int not null default 0` | Contador de turnos procesados. Tope duro `MAX_MENSAJES` en la ruta. |
 
 ### `respuestas`
 
-Una fila por encuesta completada. Contiene **todas** las respuestas de los ocho bloques del guion
-(`M-04`). (Era `fichas`.)
+Una fila por encuesta que llega al final de la entrevista. Se persiste **al detectar la ficha de
+cierre que emite Claude**, antes del formulario de contacto — así el consultor ve también las
+encuestas `respondida` (terminadas pero sin contacto). Contiene **todas** las respuestas de los
+ocho bloques del guion (`M-04`). (Era `fichas`.)
 
 **Decisión de diseño:** el clon tenía una columna tipada por dato (~30). Aquí el guion de la
 entrevista todavía no está escrito, así que congelar 30 columnas ahora garantiza migraciones cada
 vez que el guion cambie. En su lugar:
 
 - **`contenido jsonb not null`** es la fuente canónica: el objeto estructurado que produce el
-  parseo de la ficha que emite Claude al cerrar, con la forma del tipo `RespuestasEncuesta` de
-  `src/lib/rubrica/`. Cada campo lleva `{ valor, etiqueta }` con `etiqueta` de `dato_estado`,
-  igual que el `Dato<T>` heredado.
+  parseo de la ficha que emite Claude al terminar la entrevista, con la forma del tipo
+  `RespuestasEncuesta` de `src/lib/rubrica/`. Cada campo lleva `{ valor, etiqueta }` con `etiqueta`
+  de `dato_estado`, igual que el `Dato<T>` heredado.
 - **Columnas promovidas**: copia desnormalizada de los pocos campos que el panel lista/filtra y que
   el análisis de negocio (`docs/business.md`) agrega. Son estables aunque cambie la redacción de
   las preguntas.
@@ -199,6 +204,7 @@ vez que el guion cambie. En su lugar:
 | `madurez_digital` | `text` | Bloque 5. P. ej. `baja | media | alta`. |
 | `presupuesto_rango` | `text` | Bloque 7. P. ej. `sin_definir | <1k | 1k-5k | 5k-20k | >20k`. |
 | `decision_quien` | `text` | Bloque 8. Quién decide (rol), en texto acotado. |
+| `coste_ia` | `jsonb not null default '{}'::jsonb` | `usage` de las llamadas a Claude de esta encuesta: `{ entrevista: {...}, diagnostico: {...} \| null }` con tokens de entrada, salida y caché de cada una. `diagnostico` se rellena cuando se redacta (encuestas `completada`); en `respondida` queda `null`. Alimenta la métrica de coste por encuesta (`business.md` §4). |
 | `creado_en` | `timestamptz not null default now()` | |
 
 Los ocho bloques del guion (`M-04`), para referencia:
@@ -294,17 +300,20 @@ Tablas con policy de `SELECT` para consultor: `consultores`, `contactos`, `encue
 - **Reloj:** `encuestas.iniciada_en`. Todo lo demás cuelga de una encuesta.
 - **Plazo:** 24 meses. Nombrado en el texto de consentimiento.
 - **Mecanismo:** job de `pg_cron` en Supabase que borra las `encuestas` con `iniciada_en <
-  now() - interval '24 months'`. Las filas dependientes caen por `on delete cascade`
-  (`respuestas` → `resultados_rubrica` → `diagnosticos`; `notificaciones_consultor`).
-  `contactos` no se borra en cascada: una persona puede tener varias encuestas; se purga aparte
-  cuando no le queda ninguna (consulta documentada junto al job).
+  now() - interval '24 months'`, cualquiera que sea su `estado`. Las filas dependientes caen por
+  `on delete cascade` (`respuestas` → `resultados_rubrica` → `diagnosticos`;
+  `notificaciones_consultor`). `contactos` no se borra en cascada: una persona puede tener varias
+  encuestas; se purga aparte cuando no le queda ninguna (consulta documentada junto al job).
 - **Cambio respecto al clon:** el esquema heredado usaba `references` sin `on delete cascade`.
   Aquí se añade cascada en las tablas dependientes para que el job sea una sola sentencia.
-- **Limpieza de encuestas a medias:** las `en_curso` pasadas de `expira_en` se marcan
-  `abandonada` (o se borran) en el mismo job. Detalle fino → `mejoras/`.
+- **Limpieza de encuestas a medias:** en el mismo job, las `en_curso` y `respondida` pasadas de
+  `expira_en` se marcan `abandonada` (o se borran). Una `respondida` es una encuesta terminada
+  cuyo visitante no dejó contacto: pasado `expira_en` ya no la va a completar.
 
 ## 7. Invariantes
 
+- Una `encuesta` en estado `respondida` tiene exactamente una fila en `respuestas`, y
+  `contacto_id` a `null`, sin `resultados_rubrica` ni `diagnosticos`.
 - Una `encuesta` en estado `completada` tiene `contacto_id`, `finalizada_en`, y exactamente una
   fila en `respuestas`, una en `resultados_rubrica` y una en `diagnosticos`.
 - `respuestas.contenido` nunca tiene un campo con valor inventado: si el visitante no lo dio, va
@@ -312,13 +321,17 @@ Tablas con policy de `SELECT` para consultor: `consultores`, `contactos`, `encue
 - Ninguna cifra de `resultados_rubrica` procede de una respuesta del modelo.
 - No hay IP en claro en ninguna tabla.
 
-## 8. Sin transacción SQL en el cierre
+## 8. Sin transacción SQL
 
-Heredado y asumido para el MVP. Las escrituras del cierre (`persistirCierre`) van como `insert`s
-secuenciales: contacto → respuestas → resultado → diagnóstico → marcar `encuestas.estado`. Si una
-falla a mitad, puede quedar una encuesta `completada` sin diagnóstico, o una fila huérfana. Se
-detecta por `console.error` en la ruta; no hay compensación automática. Candidato a `mejoras/`
-(envolver en RPC transaccional de Postgres) cuando haya volumen real.
+Heredado y asumido para el MVP. Las escrituras van como `insert`s secuenciales en dos momentos:
+
+- **Al terminar la entrevista:** `respuestas` + `encuestas.estado = 'respondida'`.
+- **Al cerrar (formulario de contacto relleno):** `contactos` → `resultados_rubrica` →
+  `diagnosticos` → `encuestas.estado = 'completada'` + `finalizada_en`.
+
+Si una falla a mitad, puede quedar una fila huérfana o una encuesta en un estado que no cuadra con
+sus filas. Se detecta por `console.error` en la ruta; no hay compensación automática. Candidato a
+`mejoras/` (envolver cada bloque en una RPC transaccional de Postgres) cuando haya volumen real.
 
 ## 9. Cambios respecto al esquema heredado (`001_esquema_inicial.sql`)
 
@@ -326,8 +339,9 @@ detecta por `console.error` en la ruta; no hay compensación automática. Candid
 |----------|-----|--------|
 | `asesores` | `consultores` + `es_asesor()` → `es_consultor()` | Vocabulario del PRD. |
 | `clientes` (nombre opcional, solo email) | `contactos` (nombre, email, teléfono, empresa; todos `not null`) | `M-08`. |
-| `conversaciones` | `encuestas` (+ `consentimiento_version`) | Vocabulario + auditoría de consentimiento. |
-| `fichas` (~30 columnas financieras + enums de riesgo) | `respuestas` (`contenido` jsonb canónico + 5 columnas promovidas) | El guion no está escrito; evitar migraciones por cada ajuste. |
+| `conversaciones` | `encuestas` (+ `consentimiento_version`, + estado `respondida`) | Vocabulario, auditoría de consentimiento, y separar "entrevista terminada" de "cierre completo". |
+| `fichas` (~30 columnas financieras + enums de riesgo) | `respuestas` (`contenido` jsonb canónico + 5 columnas promovidas + `coste_ia`) | El guion no está escrito; evitar migraciones por cada ajuste. |
+| `fichas` persistida solo al cerrar | `respuestas` persistida al terminar la entrevista, antes del contacto | El consultor ve también las encuestas `respondida` (decisión de `user-flows.md` FLOW-01). |
 | `deudas` (grupo repetible) | — (arrays dentro de `contenido`) | No hay grupo repetible que necesite consulta relacional en la v1. |
 | `informes` (Monte Carlo, carteras, gap…) | `resultados_rubrica` (`nivel_preparacion`, `casos_uso`, `completo`) | Dominio nuevo. |
 | `planes` | `diagnosticos` | Vocabulario. |
@@ -347,3 +361,5 @@ detecta por `console.error` en la ruta; no hay compensación automática. Candid
   acotado, se puede reconsiderar pasar a columnas tipadas antes de la primera release.
 - **Enlace `contactos` ↔ `encuestas`**: 1 contacto → N encuestas por email. Si en la práctica
   molesta (misma persona, empresas distintas), se revisa.
+- **Forma exacta de `coste_ia`**: `{ entrevista, diagnostico }` con los campos de `usage` que
+  interesen (entrada, salida, `cache_read`, `cache_creation`). Se concreta al implementar F3/F4.
