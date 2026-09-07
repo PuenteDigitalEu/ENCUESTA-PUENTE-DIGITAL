@@ -9,10 +9,12 @@
 ## 1. Qué es este negocio y qué papel juega la herramienta
 
 El negocio es la **consultoría de implantación de IA** (automatizaciones y otras) para pymes y
-autónomos. Se cobra por proyecto de implantación, no por la herramienta.
+autónomos: se cobra por proyecto de implantación, no por la herramienta. La práctica está
+**arrancando** — esta encuesta es, ahora mismo, el principal mecanismo para conseguir los primeros
+clientes, no un complemento de una cartera ya montada.
 
 La encuesta conversacional **no se monetiza**: es gratis para el visitante. Su función es
-**captar y cualificar** leads antes de que el consultor les dedique tiempo:
+**captar y cualificar** leads antes de dedicarles tiempo:
 
 - **Reduce el coste de cualificación.** Hoy esa criba se hace en una primera llamada, que consume
   tiempo encaje o no el lead. La encuesta la mueve al principio del embudo y la automatiza.

@@ -113,8 +113,9 @@ dominio.
   enum, para poder añadir estados sin migración de tipo.) `respondida` = el visitante terminó los
   ocho bloques y ya hay fila en `respuestas`, pero no dejó contacto ni hay diagnóstico. `completada`
   = todo el cierre hecho (contacto + resultado + diagnóstico).
-- **`nivel_preparacion`** — **provisional**, se fija al diseñar la rúbrica: `sin_preparar |
-  inicial | en_desarrollo | consolidada`. Salida principal de la rúbrica.
+- **`nivel_preparacion`** — `sin_preparar | inicial | en_desarrollo | consolidada`. Salida
+  principal de la rúbrica; su cálculo y umbrales están en `docs/rubrica.md`. Los valores del enum
+  están fijados; los umbrales que llevan de un score al nivel se calibran en Fase 2.
 - **`limite_accion`** — `crear_encuesta | enviar_mensaje`. (Renombrado desde
   `crear_conversacion`.)
 
