@@ -35,7 +35,8 @@ export async function enviarAvisoConsultor(
     throw new Error("RESEND_API_KEY no está configurada. Rellénala en .env.local (ver .env.example).");
   }
 
-  const from = process.env.RESEND_FROM ?? "Puente Digital EU <onboarding@resend.dev>";
+  // Dominio puentedigital.eu ya verificado en Resend. Se puede sobrescribir con RESEND_FROM.
+  const from = process.env.RESEND_FROM ?? "Puente Digital EU <avisos@puentedigital.eu>";
 
   const respuesta = await fetch("https://api.resend.com/emails", {
     method: "POST",
