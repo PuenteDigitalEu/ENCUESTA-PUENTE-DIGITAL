@@ -21,8 +21,12 @@ interface MensajeChat {
   content: string;
 }
 
-/** Tope duro de turnos: red de seguridad del servidor, no el límite de uso por IP. */
-const MAX_MENSAJES = 40;
+/**
+ * Tope duro de mensajes (usuario + agente) en una conversación: red de seguridad del servidor
+ * contra una conversación descontrolada, no el límite de uso por IP. Una entrevista completa del
+ * guion ronda los 40-45 mensajes con el resumen final y la ficha; 70 deja margen sobrado.
+ */
+const MAX_MENSAJES = 70;
 
 const MENSAJE_CIERRE =
   "Perfecto, ya tengo todo lo que necesito. Antes de enseñarte el diagnóstico necesito que me " +
